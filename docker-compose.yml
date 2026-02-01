@@ -1,0 +1,69 @@
+version: '3.8'
+
+services:
+  # PostgreSQL with pgvector extension
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: feature-engine-postgres
+    ports:
+      - '5432:5432'
+    environment:
+      POSTGRES_DB: feature_engine
+      POSTGRES_USER: engine
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-enginepassword}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U engine -d feature_engine']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - feature-engine-network
+
+  # Chroma vector store
+  chroma:
+    image: chromadb/chroma:latest
+    container_name: feature-engine-chroma
+    ports:
+      - '8000:8000'
+    volumes:
+      - chroma_data:/chroma/data
+    healthcheck:
+      test: ['CMD', 'curl', '-f', 'http://localhost:8000/api/v1/heartbeat']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - feature-engine-network
+
+  # Next.js application
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: feature-engine-app
+    ports:
+      - '3000:3000'
+    depends_on:
+      postgres:
+        condition: service_healthy
+      chroma:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://engine:${DB_PASSWORD:-enginepassword}@postgres:5432/feature_engine
+      CHROMA_URL: http://chroma:8000
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      NODE_ENV: production
+    volumes:
+      - ./app/docs:/app/app/docs
+    networks:
+      - feature-engine-network
+
+volumes:
+  postgres_data:
+  chroma_data:
+
+networks:
+  feature-engine-network:
+    driver: bridge
