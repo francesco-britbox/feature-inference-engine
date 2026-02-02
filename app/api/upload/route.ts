@@ -201,16 +201,16 @@ async function processFile(
       if (existingJob && existingJob.status === 'processing') {
         result.failures.push({
           filename,
-          error: 'File already being processed',
-          details: `Document ID: ${existing.id}`,
+          error: 'File upload failed: This file has already been uploaded and is currently being processed',
+          details: `This exact file (based on content hash) already exists in the system. Document ID: ${existing.id}. The file is currently being processed. Please wait for processing to complete or view it in the Documents page.`,
         });
         return;
       }
 
       result.failures.push({
         filename,
-        error: 'Duplicate file',
-        details: `Document ID: ${existing.id}`,
+        error: 'File upload failed: This file has already been uploaded',
+        details: `This exact file (based on content hash) already exists in the system. Document ID: ${existing.id}. If you need to re-process this file, please delete it first from the Documents page, or view the existing evidence that was extracted from it.`,
       });
       return;
     }
