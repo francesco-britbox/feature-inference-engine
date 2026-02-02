@@ -2,7 +2,7 @@
 
 import { useState, useEffect, use } from 'react';
 import Link from 'next/link';
-import { ArrowLeft, Copy, Check, FileJson, FileText, File } from 'lucide-react';
+import { ArrowLeft, Copy, Check, FileJson, FileText, File, Smartphone } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -167,6 +167,8 @@ function formatAsMarkdown(epic: JiraEpic): string {
   return lines.join('\n');
 }
 
+type Platform = 'all' | 'web' | 'ios' | 'android' | 'flutter' | 'react-native';
+
 export default function ExportPage({ params }: { params: Promise<{ id: string }> }) {
   const resolvedParams = use(params);
   const [epic, setEpic] = useState<JiraEpic | null>(null);
@@ -175,18 +177,20 @@ export default function ExportPage({ params }: { params: Promise<{ id: string }>
   const [previewFormat, setPreviewFormat] = useState<'json' | 'md'>('md');
   const [previewContent, setPreviewContent] = useState('');
   const [previewDialogOpen, setPreviewDialogOpen] = useState(false);
+  const [selectedPlatform, setSelectedPlatform] = useState<Platform>('all');
 
   useEffect(() => {
     fetchEpic();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [resolvedParams.id]);
+  }, [resolvedParams.id, selectedPlatform]);
 
   const fetchEpic = async (): Promise<void> => {
     setLoading(true);
     try {
-      // Generate epic by fetching export endpoint with JSON format
+      // Generate epic by fetching export endpoint with JSON format and optional platform
+      const platformParam = selectedPlatform !== 'all' ? `&platform=${selectedPlatform}` : '';
       const response = await fetch(
-        `/api/features/${resolvedParams.id}/export?format=json`
+        `/api/features/${resolvedParams.id}/export?format=json${platformParam}`
       );
 
       if (!response.ok) {
@@ -244,8 +248,9 @@ export default function ExportPage({ params }: { params: Promise<{ id: string }>
 
   const handleDownload = async (format: 'json' | 'md' | 'csv'): Promise<void> => {
     try {
+      const platformParam = selectedPlatform !== 'all' ? `&platform=${selectedPlatform}` : '';
       const response = await fetch(
-        `/api/features/${resolvedParams.id}/export?format=${format}`
+        `/api/features/${resolvedParams.id}/export?format=${format}${platformParam}`
       );
 
       if (!response.ok) {
@@ -277,8 +282,9 @@ export default function ExportPage({ params }: { params: Promise<{ id: string }>
 
   const handlePreview = async (format: 'json' | 'md'): Promise<void> => {
     try {
+      const platformParam = selectedPlatform !== 'all' ? `&platform=${selectedPlatform}` : '';
       const response = await fetch(
-        `/api/features/${resolvedParams.id}/export?format=${format}`
+        `/api/features/${resolvedParams.id}/export?format=${format}${platformParam}`
       );
 
       if (!response.ok) {
@@ -330,12 +336,51 @@ export default function ExportPage({ params }: { params: Promise<{ id: string }>
             <Badge className={PRIORITY_COLORS[epic.priority || 'Medium']}>
               {epic.priority || 'Medium'}
             </Badge>
+            {selectedPlatform !== 'all' && (
+              <Badge variant="outline" className="gap-1">
+                <Smartphone className="h-3 w-3" />
+                {selectedPlatform.toUpperCase()}
+              </Badge>
+            )}
           </div>
           <p className="text-muted-foreground mt-2">
             {epic.title}
           </p>
         </div>
       </div>
+
+      {/* Platform Selector */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Smartphone className="h-5 w-5" />
+            Target Platform
+          </CardTitle>
+          <CardDescription>
+            Select the platform for platform-specific story generation and subtasks
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="flex items-center gap-4">
+            <label htmlFor="platform-select" className="text-sm font-medium">
+              Platform:
+            </label>
+            <select
+              id="platform-select"
+              value={selectedPlatform}
+              onChange={(e) => setSelectedPlatform(e.target.value as Platform)}
+              className="flex h-10 w-full max-w-xs rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+            >
+              <option value="all">All Platforms</option>
+              <option value="web">Web</option>
+              <option value="ios">iOS</option>
+              <option value="android">Android</option>
+              <option value="flutter">Flutter</option>
+              <option value="react-native">React Native</option>
+            </select>
+          </div>
+        </CardContent>
+      </Card>
 
       {/* Export Actions */}
       <Card>
