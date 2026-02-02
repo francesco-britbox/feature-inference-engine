@@ -36,12 +36,17 @@ export async function uploadFiles(files: File[]): Promise<UploadResult> {
     body: formData,
   });
 
-  if (!response.ok) {
-    const errorData = await response.json().catch(() => ({ error: 'Upload failed' }));
-    throw new Error(errorData.error || 'Upload failed');
+  // Parse response body
+  const data = await response.json();
+
+  // 400 with valid UploadResult structure is OK (partial failures allowed)
+  if (!response.ok && response.status !== 400) {
+    // Only throw for non-400 errors (500, 503, etc)
+    throw new Error(data.error || 'Upload failed');
   }
 
-  return await response.json();
+  // Return result (may contain successes and/or failures)
+  return data as UploadResult;
 }
 
 /**
