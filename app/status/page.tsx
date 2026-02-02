@@ -1,9 +1,11 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { FileText, Database, Layers, Clock, CheckCircle, XCircle, Loader2 } from 'lucide-react';
+import Link from 'next/link';
+import { FileText, Database, Layers, Clock, CheckCircle, XCircle, Loader2, ArrowLeft } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
 
 interface SystemStats {
   documents: {
@@ -77,6 +79,12 @@ export default function StatusPage() {
   return (
     <div className="container mx-auto py-8 space-y-6">
       <div>
+        <Link href="/">
+          <Button variant="ghost" size="sm" className="mb-4">
+            <ArrowLeft className="h-4 w-4 mr-2" />
+            Back to Home
+          </Button>
+        </Link>
         <h1 className="text-3xl font-bold tracking-tight">System Status</h1>
         <p className="text-muted-foreground mt-2">
           Real-time overview of system activity and processing
@@ -101,7 +109,11 @@ export default function StatusPage() {
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">Processing</CardTitle>
-            <Loader2 className="h-4 w-4 text-blue-600 animate-spin" />
+            <Loader2
+              className={`h-4 w-4 text-blue-600 ${
+                stats.documents.byStatus.processing > 0 ? 'animate-spin' : ''
+              }`}
+            />
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold text-blue-600">

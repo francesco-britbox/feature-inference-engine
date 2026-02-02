@@ -1,7 +1,8 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { Search, Filter, FileText } from 'lucide-react';
+import Link from 'next/link';
+import { Search, Filter, FileText, ArrowLeft } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
@@ -85,6 +86,12 @@ export default function EvidencePage() {
   return (
     <div className="container mx-auto py-8 space-y-6">
       <div>
+        <Link href="/">
+          <Button variant="ghost" size="sm" className="mb-4">
+            <ArrowLeft className="h-4 w-4 mr-2" />
+            Back to Home
+          </Button>
+        </Link>
         <h1 className="text-3xl font-bold tracking-tight">Evidence Explorer</h1>
         <p className="text-muted-foreground mt-2">
           View all extracted evidence from uploaded documents
@@ -194,12 +201,9 @@ export default function EvidencePage() {
                         <p className="line-clamp-2">{item.content}</p>
                       </TableCell>
                       <TableCell>
-                        <a
-                          href={`/documents/${item.documentId}`}
-                          className="text-sm text-primary hover:underline truncate block"
-                        >
+                        <span className="text-sm text-muted-foreground truncate block">
                           {item.documentFilename}
-                        </a>
+                        </span>
                       </TableCell>
                       <TableCell className="text-sm text-muted-foreground">
                         {formatDate(item.extractedAt)}

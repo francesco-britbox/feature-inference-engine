@@ -1,8 +1,9 @@
 'use client';
 
 import { useState, useCallback, useEffect } from 'react';
+import Link from 'next/link';
 import { useDropzone } from 'react-dropzone';
-import { Upload, CheckCircle, XCircle, Loader2, FileText } from 'lucide-react';
+import { Upload, CheckCircle, XCircle, Loader2, FileText, ArrowLeft } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Progress } from '@/components/ui/progress';
 import { Badge } from '@/components/ui/badge';
@@ -184,6 +185,12 @@ export default function UploadPage(): JSX.Element {
   return (
     <div className="container mx-auto py-8 space-y-8">
       <div>
+        <Link href="/">
+          <Button variant="ghost" size="sm" className="mb-4">
+            <ArrowLeft className="h-4 w-4 mr-2" />
+            Back to Home
+          </Button>
+        </Link>
         <h1 className="text-3xl font-bold tracking-tight">Upload Documents</h1>
         <p className="text-muted-foreground mt-2">
           Upload screenshots, API specs, PDFs, or CSV files for feature extraction
