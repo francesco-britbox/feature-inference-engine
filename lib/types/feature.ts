@@ -9,10 +9,10 @@ export type RelationshipType = 'implements' | 'supports' | 'constrains' | 'exten
 export interface Feature {
   id: string;
   name: string;
-  description?: string;
-  confidenceScore?: number;
-  status: FeatureStatus;
-  inferredAt: Date;
+  description?: string | null;
+  confidenceScore?: number | string; // API returns string, services use number
+  status: FeatureStatus | string; // API may return raw string
+  inferredAt?: Date;
   reviewedAt?: Date;
   reviewedBy?: string;
   metadata?: Record<string, unknown>;

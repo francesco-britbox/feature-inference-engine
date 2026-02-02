@@ -29,3 +29,11 @@ export const PLATFORM_TECH_STACKS: Record<Platform, string[]> = {
   flutter: ['Dart', 'Flutter SDK', 'Material Design', 'Cupertino'],
   'react-native': ['React Native', 'JavaScript', 'TypeScript', 'Expo'],
 };
+
+/**
+ * Type guard to validate platform selection
+ * Ensures type safety when casting string values to Platform type
+ */
+export function isPlatform(value: string): value is Platform {
+  return ['web', 'ios', 'android', 'flutter', 'react-native'].includes(value);
+}

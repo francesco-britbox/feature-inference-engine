@@ -21,6 +21,8 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Progress } from '@/components/ui/progress';
+import { QuickExportSection } from '@/components/QuickExportSection';
+import type { Feature } from '@/lib/types/feature';
 
 interface ApiStats {
   documents: {
@@ -63,10 +65,12 @@ export default function Home() {
   });
   const [loading, setLoading] = useState(true);
   const [systemHealthy, setSystemHealthy] = useState(false);
+  const [topFeatures, setTopFeatures] = useState<Feature[]>([]);
 
   useEffect(() => {
     fetchStats();
     checkHealth();
+    fetchTopFeatures();
   }, []);
 
   const fetchStats = async () => {
@@ -94,6 +98,17 @@ export default function Home() {
       setSystemHealthy(response.ok);
     } catch {
       setSystemHealthy(false);
+    }
+  };
+
+  const fetchTopFeatures = async () => {
+    try {
+      const response = await fetch('/api/features?status=confirmed&limit=3');
+      if (!response.ok) return;
+      const data: Feature[] = await response.json();
+      setTopFeatures(data);
+    } catch {
+      // Silent fail - UI will not show Quick Export section
     }
   };
 
@@ -391,6 +406,9 @@ export default function Home() {
           </CardContent>
         </Card>
       )}
+
+      {/* Quick Export */}
+      <QuickExportSection features={topFeatures} />
 
       {/* Getting Started */}
       {stats.documents === 0 && (

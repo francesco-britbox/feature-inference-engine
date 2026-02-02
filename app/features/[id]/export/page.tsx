@@ -15,6 +15,8 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
+import type { Platform } from '@/lib/types/platform';
+import { isPlatform } from '@/lib/types/platform';
 
 interface JiraStory {
   title: string;
@@ -167,8 +169,6 @@ function formatAsMarkdown(epic: JiraEpic): string {
   return lines.join('\n');
 }
 
-type Platform = 'all' | 'web' | 'ios' | 'android' | 'flutter' | 'react-native';
-
 export default function ExportPage({ params }: { params: Promise<{ id: string }> }) {
   const resolvedParams = use(params);
   const [epic, setEpic] = useState<JiraEpic | null>(null);
@@ -177,7 +177,7 @@ export default function ExportPage({ params }: { params: Promise<{ id: string }>
   const [previewFormat, setPreviewFormat] = useState<'json' | 'md'>('md');
   const [previewContent, setPreviewContent] = useState('');
   const [previewDialogOpen, setPreviewDialogOpen] = useState(false);
-  const [selectedPlatform, setSelectedPlatform] = useState<Platform>('all');
+  const [selectedPlatform, setSelectedPlatform] = useState<Platform | 'all'>('all');
 
   useEffect(() => {
     fetchEpic();
@@ -368,7 +368,12 @@ export default function ExportPage({ params }: { params: Promise<{ id: string }>
             <select
               id="platform-select"
               value={selectedPlatform}
-              onChange={(e) => setSelectedPlatform(e.target.value as Platform)}
+              onChange={(e) => {
+                const value = e.target.value;
+                if (value === 'all' || isPlatform(value)) {
+                  setSelectedPlatform(value as Platform | 'all');
+                }
+              }}
               className="flex h-10 w-full max-w-xs rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
             >
               <option value="all">All Platforms</option>

@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
-import { Check, X, Eye, Filter } from 'lucide-react';
+import { Check, X, Eye, Filter, Download } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -175,6 +175,12 @@ export default function FeaturesPage() {
                       <Button variant="outline" className="w-full">
                         <Eye className="h-4 w-4 mr-2" />
                         View Details
+                      </Button>
+                    </Link>
+                    <Link href={`/features/${feature.id}/export`}>
+                      <Button variant="outline">
+                        <Download className="h-4 w-4 mr-2" />
+                        Export
                       </Button>
                     </Link>
                     {feature.status === 'candidate' && (
