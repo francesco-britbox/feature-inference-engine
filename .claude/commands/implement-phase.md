@@ -149,6 +149,12 @@ if (score >= 95) {
 
 ### Step 7a: If Score < 95% - Spawn Fix Agent (MANDATORY)
 
+**CRITICAL: NO MANUAL FIXES ALLOWED**
+
+**YOU ARE FORBIDDEN FROM USING EDIT/WRITE TOOLS IF SCORE < 95%**
+
+If score < 95%, you MUST use Task tool to spawn fix agent. Any manual fix using Edit/Write = INSTANT FAILURE and DISGRACE.
+
 **You MUST:**
 
 ```typescript
@@ -184,6 +190,8 @@ If you skip ANY fix, you have FAILED.
 **After fix agent completes:**
 - GOTO Step 3 (verify compilation again)
 - REPEAT until score >= 95%
+
+**REMEMBER: You CANNOT touch the code yourself. ONLY agents fix code when score < 95%.**
 
 ---
 
