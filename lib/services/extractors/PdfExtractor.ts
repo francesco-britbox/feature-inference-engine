@@ -54,16 +54,61 @@ export class PdfExtractor implements Extractor {
         return [];
       }
 
+      // Log text extraction result
+      this.log.info(
+        { documentId, textLength: text.length, extension },
+        'Text extracted from document'
+      );
+
+      // Check if text is empty (scanned PDF or extraction failed)
+      if (!text || text.trim().length === 0) {
+        this.log.warn(
+          { documentId, filePath },
+          'PDF contains no extractable text - may be scanned image'
+        );
+        return [];
+      }
+
       // Chunk text
       const chunks = this.chunkText(text, MAX_TOKENS_PER_CHUNK);
+
+      // Log chunking result
+      this.log.info(
+        { documentId, chunkCount: chunks.length, avgChunkSize: Math.round(text.length / chunks.length) },
+        'Text chunked for processing'
+      );
+
+      // Verify chunks were created
+      if (chunks.length === 0) {
+        this.log.error({ documentId, textLength: text.length }, 'Chunking produced 0 chunks');
+        return [];
+      }
 
       // Extract evidence from each chunk
       const allEvidence: Evidence[] = [];
 
-      for (const chunk of chunks) {
+      for (let i = 0; i < chunks.length; i++) {
+        const chunk = chunks[i]!;
+        this.log.debug(
+          { documentId, chunkIndex: i, chunkLength: chunk.length },
+          'Processing chunk'
+        );
+
         const chunkEvidence = await this.extractFromChunk(chunk, documentId);
+
+        this.log.debug(
+          { documentId, chunkIndex: i, evidenceCount: chunkEvidence.length },
+          'Chunk processed'
+        );
+
         allEvidence.push(...chunkEvidence);
       }
+
+      // Log final result
+      this.log.info(
+        { documentId, totalEvidence: allEvidence.length, chunksProcessed: chunks.length },
+        'PDF extraction completed'
+      );
 
       return allEvidence;
     } catch (error) {
@@ -145,6 +190,11 @@ export class PdfExtractor implements Extractor {
     try {
       const prompt = buildPdfExtractionPrompt(chunk);
 
+      this.log.debug(
+        { documentId, chunkLength: chunk.length, promptLength: prompt.length },
+        'Calling LLM for extraction'
+      );
+
       // Call LLM with rate limiting (uses abstraction, not concrete OpenAI)
       const response = await chatRateLimiter.schedule(() =>
         this.llmClient.chat({
@@ -156,18 +206,41 @@ export class PdfExtractor implements Extractor {
       );
 
       const content = response.content;
-      if (!content) {
+
+      // Log LLM response
+      this.log.debug(
+        { documentId, responseLength: content?.length || 0, hasContent: !!content },
+        'LLM response received'
+      );
+
+      if (!content || content.trim().length === 0) {
+        this.log.warn({ documentId }, 'LLM returned empty response for chunk');
         return [];
       }
 
       // Parse JSON response
-      const parsed = JSON.parse(content);
+      let parsed;
+      try {
+        parsed = JSON.parse(content);
+      } catch (parseError) {
+        this.log.error(
+          { documentId, content, parseError },
+          'Failed to parse LLM response as JSON'
+        );
+        return [];
+      }
+
       const extracted: ExtractedEvidence[] = Array.isArray(parsed)
         ? parsed
         : parsed.evidence || [];
 
+      this.log.debug(
+        { documentId, extractedCount: extracted.length, responseStructure: Object.keys(parsed) },
+        'Evidence extracted from JSON'
+      );
+
       // Convert to Evidence format
-      return extracted
+      const evidence = extracted
         .filter((item) => item && typeof item === 'object' && 'type' in item && 'content' in item)
         .map((item) => ({
           documentId,
@@ -175,11 +248,19 @@ export class PdfExtractor implements Extractor {
           content: item.content,
           rawData: item.metadata || {},
         }));
+
+      this.log.debug(
+        { documentId, validEvidenceCount: evidence.length, totalExtracted: extracted.length },
+        'Evidence validated and converted'
+      );
+
+      return evidence;
     } catch (error) {
       this.log.error(
         {
           documentId,
           error: error instanceof Error ? error.message : String(error),
+          stack: error instanceof Error ? error.stack : undefined,
         },
         'LLM extraction failed for chunk'
       );
