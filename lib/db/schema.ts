@@ -128,6 +128,9 @@ export const features = pgTable(
     inferredAt: timestamp('inferred_at', { withTimezone: true }).defaultNow().notNull(),
     reviewedAt: timestamp('reviewed_at', { withTimezone: true }),
     reviewedBy: text('reviewed_by'),
+    enrichmentStatus: text('enrichment_status').default('pending'),
+    enrichedAt: timestamp('enriched_at', { withTimezone: true }),
+    enrichmentError: text('enrichment_error'),
     metadata: jsonb('metadata'),
   },
   (table) => ({
@@ -138,6 +141,10 @@ export const features = pgTable(
     checkConfidence: check(
       'check_confidence_range',
       sql`${table.confidenceScore} >= 0 AND ${table.confidenceScore} <= 1`
+    ),
+    checkEnrichmentStatus: check(
+      'check_enrichment_status',
+      sql`${table.enrichmentStatus} IN ('pending', 'enriching', 'completed', 'failed', 'skipped')`
     ),
   })
 );
@@ -206,3 +213,58 @@ export const featureOutputs = pgTable(
     ),
   })
 );
+
+/**
+ * enrichment_sources table
+ * External requirements from platform guidelines, legal, accessibility, security
+ */
+export const enrichmentSources = pgTable(
+  'enrichment_sources',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    featureId: uuid('feature_id')
+      .references(() => features.id, { onDelete: 'cascade' })
+      .notNull(),
+    sourceType: text('source_type').notNull(),
+    sourceName: text('source_name').notNull(),
+    sourceUrl: text('source_url'),
+    content: text('content').notNull(),
+    relevanceScore: numeric('relevance_score', { precision: 3, scale: 2 }),
+    mandatory: boolean('mandatory').default(false).notNull(),
+    fetchedAt: timestamp('fetched_at', { withTimezone: true }).defaultNow().notNull(),
+    metadata: jsonb('metadata'),
+  },
+  (table) => ({
+    checkSourceType: check(
+      'check_source_type',
+      sql`${table.sourceType} IN (
+        'ios_hig',
+        'android_material',
+        'apple_store',
+        'google_play',
+        'wcag',
+        'owasp',
+        'gdpr',
+        'ccpa',
+        'edge_case',
+        'legal',
+        'other'
+      )`
+    ),
+    checkRelevanceScore: check(
+      'check_relevance_score',
+      sql`${table.relevanceScore} >= 0 AND ${table.relevanceScore} <= 1`
+    ),
+  })
+);
+
+/**
+ * guideline_cache table
+ * Cache for fetched platform guidelines (90-day TTL)
+ */
+export const guidelineCache = pgTable('guideline_cache', {
+  cacheKey: text('cache_key').primaryKey(),
+  content: text('content').notNull(),
+  fetchedAt: timestamp('fetched_at', { withTimezone: true }).defaultNow().notNull(),
+  expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+});
