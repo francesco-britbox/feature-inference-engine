@@ -155,3 +155,8 @@ export class OpenAIClient implements LLMClient {
     return new Error('Unknown OpenAI error');
   }
 }
+
+/**
+ * Singleton instance of OpenAI client
+ */
+export const openaiClient = new OpenAIClient();

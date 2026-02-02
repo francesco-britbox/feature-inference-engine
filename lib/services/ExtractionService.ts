@@ -14,6 +14,7 @@ import { documentStatusService } from './DocumentStatusService';
 import { evidenceStorageService } from './EvidenceStorageService';
 import type { Extractor } from '@/lib/types/evidence';
 import type { FileType } from '@/lib/types/document';
+import type { IExtractionService } from '@/lib/types/services';
 import { logger } from '@/lib/utils/logger';
 
 /**
@@ -29,7 +30,7 @@ const EXTRACTOR_MAP = new Map<FileType, Extractor>([
   ['csv', jiraExtractor],
 ]);
 
-export class ExtractionService {
+export class ExtractionService implements IExtractionService {
   private readonly log = logger.child({ service: 'ExtractionService' });
 
   /**

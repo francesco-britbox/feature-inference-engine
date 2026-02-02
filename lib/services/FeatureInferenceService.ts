@@ -6,6 +6,7 @@
 
 import type { LLMClient } from '@/lib/types/llm';
 import type { FeatureHypothesis } from '@/lib/types/feature';
+import type { IFeatureInferenceService } from '@/lib/types/services';
 import { buildFeatureHypothesisPrompt, buildFeatureSimilarityPrompt } from '@/lib/prompts/inference';
 import { db } from '@/lib/db/client';
 import { features, featureEvidence } from '@/lib/db/schema';
@@ -39,7 +40,7 @@ interface FeatureComparison {
  * Feature Inference Service
  * Generates feature hypotheses from evidence clusters and validates across clusters
  */
-export class FeatureInferenceService {
+export class FeatureInferenceService implements IFeatureInferenceService {
   private readonly MODEL = 'gpt-4o';
   private readonly TEMPERATURE = 0.3;
   private readonly SIMILARITY_THRESHOLD = 0.75;

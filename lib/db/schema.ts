@@ -12,6 +12,7 @@ import {
   numeric,
   vector,
   integer,
+  boolean,
   unique,
   check,
 } from 'drizzle-orm/pg-core';
@@ -30,6 +31,7 @@ export const documents = pgTable(
     filePath: text('file_path').notNull(),
     fileHash: text('file_hash').notNull().unique(),
     status: text('status').default('uploaded').notNull(),
+    version: integer('version').default(1).notNull(),
     uploadedAt: timestamp('uploaded_at', { withTimezone: true }).defaultNow().notNull(),
     processedAt: timestamp('processed_at', { withTimezone: true }),
     errorMessage: text('error_message'),
@@ -90,6 +92,7 @@ export const evidence = pgTable(
     content: text('content').notNull(),
     rawData: jsonb('raw_data'),
     embedding: vector('embedding', { dimensions: 3072 }),
+    obsolete: boolean('obsolete').default(false).notNull(),
     extractedAt: timestamp('extracted_at', { withTimezone: true }).defaultNow().notNull(),
   },
   (table) => ({

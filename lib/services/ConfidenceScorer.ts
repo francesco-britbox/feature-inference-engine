@@ -8,6 +8,7 @@ import { db } from '@/lib/db/client';
 import { features, featureEvidence, evidence } from '@/lib/db/schema';
 import { eq, inArray } from 'drizzle-orm';
 import { SIGNAL_WEIGHTS } from '@/lib/types/feature';
+import type { IConfidenceScorer } from '@/lib/types/services';
 import { createLogger } from '@/lib/utils/logger';
 import { InvalidDataError } from '@/lib/utils/errors';
 
@@ -46,7 +47,7 @@ interface ConfidenceResult {
  * Calculates confidence scores for features based on linked evidence
  * Updates feature status based on confidence thresholds
  */
-export class ConfidenceScorer {
+export class ConfidenceScorer implements IConfidenceScorer {
   /**
    * Calculate confidence score for a single feature
    * Formula: confidence = 1 - Π(1-weight) where weight comes from evidence type
