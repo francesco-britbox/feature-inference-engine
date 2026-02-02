@@ -67,7 +67,7 @@ export class ClusteringService {
         dataset: embeddings,
         epsilon: DBSCAN_EPS,
         minimumPoints: DBSCAN_MIN_SAMPLES,
-        distanceFunction: this.cosineDistance,
+        distanceFunction: (a: number[], b: number[]) => this.cosineDistance(a, b),
       });
 
       // Group by cluster ID

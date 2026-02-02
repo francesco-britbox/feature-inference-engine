@@ -1,0 +1,814 @@
+openapi: 3.0.3
+info:
+  version: "v1"
+  title: BritBox Application API
+  description: API used by BritBox front-end applications.
+
+servers:
+  - description: Production
+    url: https://app.api.britbox.com
+  - description: Staging
+    url: https://stage.app.api.britbox.com
+  - description: Testing
+    url: https://test.app.api.britbox.com
+  - description: Development
+    url: https://dev.app.api.britbox.com
+
+security:
+  - jwt: []
+
+tags:
+  - name: GeoLocation
+    description: Set of endpoints for checking client location
+  - name: Configuration
+    description: Set of endpoints for retrieving configuration
+  - name: Localization
+    description: Set of endpoints for retrieving localized strings
+  - name: Entitlement
+    description: Set of endpoints for checking entitlements
+  - name: Health
+    description: Set of endpoints providing health and system status
+
+paths:
+
+  "/entitlement/v1":
+    get:
+      summary: Check user entitlement
+      description: |
+        Determines whether the user is entitled to watch the requested content at the requested quality.
+
+        If the supplied `versionId` represents an Amagi channel the `versionQuality` parameter should be omitted.
+
+        If the user is allowed to watch the content a token is returned, this token is then used to retrieve media manifests
+        via the BritBox Media Routing API. The token is valid for 1 hour.
+
+        If the user is denied access to the content a 403 error will be returned.
+
+        A user may be denied access for multiple reasons, the content may not be available in the users current location, the
+        content itself or the quality requested is not available for the users subscription level or the user is already
+        watching the maximum number of streams.
+
+        An authentication token is required to obtain a playback token for all content unless it's a trailer or classified as free.
+      operationId: checkUserEntitlement
+      tags:
+        - Entitlement
+      security: []
+      parameters:
+        - "$ref": "#/components/parameters/deviceInfoHeaderParam"
+        - "$ref": "#/components/parameters/versionIdQueryParam"
+        - "$ref": "#/components/parameters/versionQualityQueryParam"
+      responses:
+        "200":
+          $ref: "#/components/responses/EntitlementResult"
+        "400":
+          $ref: "#/components/responses/BadRequestError"
+        "401":
+          $ref: "#/components/responses/UnauthorizedError"
+        "403":
+          $ref: "#/components/responses/ForbiddenError"
+        "500":
+          $ref: "#/components/responses/UnexpectedError"
+
+  "/entitlement/v1/health":
+    get:
+      summary: Health check
+      description: Checks the health of the Entitlement Service.
+      operationId: checkEntitlementHealth
+      tags:
+          - Health
+      security: []
+      responses:
+        "200":
+          $ref: "#/components/responses/Health"
+        "500":
+          $ref: "#/components/responses/UnexpectedError"
+        "503":
+          $ref: "#/components/responses/Health"
+
+  "/entitlement/v1/system-status":
+    get:
+      summary: System status
+      description: Checks the status of the Entitlement Service.
+      operationId: checkEntitlementSystemStatus
+      tags:
+          - Health
+      responses:
+        "200":
+          $ref: "#/components/responses/SystemStatus"
+        "401":
+          $ref: "#/components/responses/UnauthorizedError"
+        "403":
+          $ref: "#/components/responses/ForbiddenError"
+        "500":
+          $ref: "#/components/responses/UnexpectedError"
+        "503":
+          $ref: "#/components/responses/SystemStatus"
+
+  "/geo-location/v1":
+    get:
+      summary: Retrieve current location
+      description: |
+        Retrieves information about the current location of the client making the request.
+        
+        The ISO 3166-1 two letter code of the `country` the client is located in is returned. The `isEEACountry` property specifies
+        whether the country is within the EEA, this can be used to determine whether to show a sign-in CTA in the UI.
+
+        The `isSupported` property specifies whether the service is supported in that location taking EU portability rules into account.
+
+        The `isDeviceSupported` property specifies whether the device the user is using is supported in their current location.
+
+        If an authentication token is provided with the request the response will include two additional properties. The
+        `isPortable` property indicates whether the user can access the service outside of their home country, which is provided
+        via the `accountCountry` property.
+      operationId: retrieveCurrentLocation
+      tags:
+        - GeoLocation
+      parameters:
+        - "$ref": "#/components/parameters/deviceInfoHeaderParam"
+      security: []
+      responses:
+        "200":
+          $ref: "#/components/responses/GeoLocationResult"
+        "500":
+          $ref: "#/components/responses/UnexpectedError"
+
+  "/localization/v1":
+    get:
+      summary: Retrieve localized strings
+      description: |
+        Retrieves localized strings for a given language and device.
+
+        If the language parameter is not provided the strings for "en-US" are returned.
+
+        If the requested language does not exist a 404 error will be returned.
+      operationId: retrieveLocalizedStrings
+      tags:
+        - Localization
+      parameters:
+        - "$ref": "#/components/parameters/deviceInfoHeaderParam"
+        - "$ref": "#/components/parameters/languageQueryParam"
+      security: []
+      responses:
+        "200":
+          $ref: "#/components/responses/LocalizationResult"
+        "400":
+          $ref: "#/components/responses/BadRequestError"
+        "404":
+          $ref: "#/components/responses/NotFoundError"
+        "500":
+          $ref: "#/components/responses/UnexpectedError"
+
+  "/localization/v1/health":
+    get:
+      summary: Health check
+      description: Checks the health of the Localization Service.
+      operationId: checkLocalizationHealth
+      tags:
+          - Health
+      security: []
+      responses:
+        "200":
+          $ref: "#/components/responses/Health"
+        "500":
+          $ref: "#/components/responses/UnexpectedError"
+        "503":
+          $ref: "#/components/responses/Health"
+
+  "/localization/v1/system-status":
+    get:
+      summary: System status
+      description: Checks the status of the Localization Service.
+      operationId: checkLocalizationSystemStatus
+      tags:
+          - Health
+      responses:
+        "200":
+          $ref: "#/components/responses/SystemStatus"
+        "401":
+          $ref: "#/components/responses/UnauthorizedError"
+        "403":
+          $ref: "#/components/responses/ForbiddenError"
+        "500":
+          $ref: "#/components/responses/UnexpectedError"
+        "503":
+          $ref: "#/components/responses/SystemStatus"
+
+  "/configuration/v1":
+    get:
+      summary: Retrieve configuration
+      description: |
+        Retrieves configuration data for the front-end applications based on the provided country, device, subscription level and
+        user tags.
+
+        As well as the values documented here the backend configuration system also allows values to be exposed dynamically via this
+        endpoint. Please refer to the Application API Getting Started Guide for more information.
+
+        The `deviceName` query string parameter and the `X-BBI-DeviceInfo` header are both required and the value
+        of the `deviceName` parameter must also match the first element of the `X-BBI-DeviceInfo` header, othwerwise
+        a 400 error will be returned.
+
+        **NOTE: The deviceName query string parameter will be removed soon but remains required for now.**
+      operationId: retrieveConfiguration
+      tags:
+        - Configuration
+      parameters:
+        - "$ref": "#/components/parameters/deviceInfoHeaderParam"
+        - "$ref": "#/components/parameters/countryQueryParam"
+        - "$ref": "#/components/parameters/deviceNameQueryParam"
+        - "$ref": "#/components/parameters/subLevelQueryParam"
+        - "$ref": "#/components/parameters/tagsQueryParam"
+      security: []
+      responses:
+        "200":
+          $ref: "#/components/responses/ConfigurationResult"
+        "400":
+          $ref: "#/components/responses/BadRequestError"
+        "500":
+          $ref: "#/components/responses/UnexpectedError"
+
+  "/configuration/v1/health":
+    get:
+      summary: Health check
+      description: Checks the health of the Configuration Service.
+      operationId: checkConfigurationHealth
+      tags:
+          - Health
+      security: []
+      responses:
+        "200":
+          $ref: "#/components/responses/Health"
+        "500":
+          $ref: "#/components/responses/UnexpectedError"
+        "503":
+          $ref: "#/components/responses/Health"
+
+  "/configuration/v1/system-status":
+    get:
+      summary: System status
+      description: Checks the status of the Configuration Service.
+      operationId: checkConfigurationSystemStatus
+      tags:
+          - Health
+      responses:
+        "200":
+          $ref: "#/components/responses/SystemStatus"
+        "401":
+          $ref: "#/components/responses/UnauthorizedError"
+        "403":
+          $ref: "#/components/responses/ForbiddenError"
+        "500":
+          $ref: "#/components/responses/UnexpectedError"
+        "503":
+          $ref: "#/components/responses/SystemStatus"
+
+components:
+  securitySchemes:
+    jwt:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: Evergent JWT token provided as bearer token in Authorization header.
+
+  parameters:
+    deviceInfoHeaderParam:
+      name: X-BBI-DeviceInfo
+      in: header
+      description: |
+        Comma separated string containing the following information:
+
+        {device_name},{app_version},{manufacturer},{model},{os},{device_id}
+
+        To anonoymise the data the `device_id` should be hashed before it's added to the string.
+
+        If a value can not be found for any part of the string (except the device name) "N/A" can be used,
+        for example, "tv_roku,1.0,Roku,3840EU-GB,N/A,14aab99360aca3a434e721f06c066b37".
+      schema:
+        type: string
+      required: true
+
+    deviceNameQueryParam:
+      name: deviceName
+      in: query
+      description: |
+        The name of the device being used (the first element of the X-BBI-DeviceInfo header).
+
+        **NOTE: The deviceName query string parameter will be removed soon but remains required for now.**
+      schema:
+        type: string
+        enum:
+          - phone_android
+          - phone_iOS
+          - tablet_android
+          - tablet_iOS
+          - tvOS
+          - tv_android
+          - tv_comcast
+          - tv_dstv
+          - tv_firetv
+          - tv_foxtel
+          - tv_hisense
+          - tv_lg_webos
+          - tv_netrange
+          - tv_rogers
+          - tv_roku
+          - tv_samsung
+          - tv_vizio
+          - web_browser
+      required: true
+
+    countryQueryParam:
+      name: country
+      in: query
+      description: The ISO 3166-1 two letter code of the country e.g. "US", "AU" etc.
+      schema:
+        type: string
+      required: true
+
+    subLevelQueryParam:
+      name: subLevel
+      in: query
+      description: The subscription level of the user.
+      schema:
+        type: string
+        enum:
+          - Anonymous
+          - Registered
+          - Subscriber
+          - Premier
+
+    tagsQueryParam:
+      name: tags
+      in: query
+      description: Comma separated set of tags applied to the user.
+      schema:
+        type: string
+
+    versionIdQueryParam:
+      name: versionId
+      in: query
+      description: Unique ID of the content version.
+      schema:
+        type: string
+      required: true
+
+    versionQualityQueryParam:
+      name: versionQuality
+      in: query
+      description: Quality of the version being requested.
+      schema:
+        type: string
+        enum:
+          - SD
+          - HD
+          - UHD
+
+    languageQueryParam:
+      name: language
+      in: query
+      description: Language code and variant of the language being requested.
+      schema:
+        type: string
+
+  schemas:
+    Error:
+      type: object
+      description: Error details
+      properties:
+        title:
+          type: string
+          description: The reason phrase for the specified HTTP status code
+        status:
+          type: integer
+          description: The HTTP status code
+        detail:
+          type: string
+          description: A human-readable representation of the error
+        code:
+          type: string
+          description: An optional internal BritBox error code
+        traceId:
+          type: string
+          description: An internal identifier to locate the request that caused the error
+        instance:
+          type: string
+          description: A combination of the HTTP request method and the request path
+        exception:
+          type: string
+          description: The exception stack trace that caused the error
+      required:
+        - title
+        - status
+        - detail
+
+    NavigationConfigNode:
+      type: object
+      description: Definition of a node for navigation configuration.
+      properties:
+        label:
+          type: string
+        path:
+          type: string
+        depth:
+          type: integer
+        children:
+          type: array
+          items:
+            $ref: "#/components/schemas/NavigationConfigNode"
+        customFields:
+          type: object
+          additionalProperties: true
+      required: 
+        - depth
+
+  responses:
+    
+    # Health responses
+
+    Health:
+      description: API health response
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              available:
+                type: boolean
+                description: Indicates whether the system is available i.e. healthy
+            required:
+              - available
+
+    SystemStatus:
+      description: System status response
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              data:
+                type: object
+                properties:
+                  available:
+                    type: boolean
+                    description: Indicates whether the system is available i.e. healthy
+                  dateTime:
+                    type: string
+                    format: date-time
+                    description: The date and time the system status was checked
+                  name:
+                    type: string
+                    description: The name of the system
+                  environment:
+                    type: string
+                    description: The type of environment
+                    enum:
+                      - Production
+                      - Stage
+                      - Test
+                      - Development
+                  totalDuration:
+                    type: string
+                    description: The total time it took to determine the system status
+                  branchName:
+                    type: string
+                    description: The name of the branch deployed to the environment
+                  ecsTaskId:
+                    type: string
+                    description: The identifier of the ECS task that served the request
+                  deploymentVersion:
+                    type: string
+                    description: The version of the current deployment on this environment
+                  regionName:
+                    type: string
+                    description: The region that served the request
+                  services:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        name:
+                          type: string
+                          description: The name of the service
+                        available:
+                          type: boolean
+                          description: Indicates whether the service is available i.e. healthy
+                        description:
+                          type: string
+                          description: Description of the service status, may contain an error message when the system is unavailable
+                        duration:
+                          type: string
+                          description: The time it took to determine the service status
+                      required:
+                        - name
+                        - available
+                        - description
+                        - duration
+                required:
+                  - available
+                  - dateTime
+                  - name
+                  - environment
+                  - totalDuration
+            required:
+              - data
+    
+    # Error responses
+
+    BadRequestError:
+      description: The request was syntactically incorrect, malformed or missing mandatory information
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+
+    UnauthorizedError:
+      description: The request was unauthorized
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+
+    ForbiddenError:
+      description: The request was forbidden
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+
+    NotFoundError:
+      description: Requested resource was not found
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+
+    UnexpectedError:
+      description: An unexpected error occurred
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+
+    # Specific endpoint responses
+
+    EntitlementResult:
+      description: Entitlement result
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              data:
+                properties:
+                  token:
+                    type: string
+                    description: A playback token that can be used with the Media Routing API
+                    readOnly: true
+                required:
+                  - token
+            required:
+              - data
+
+    GeoLocationResult:
+      description: GeoLocation result
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              data:
+                properties:
+                  country:
+                    type: string
+                    description: The country the client making the request is located
+                    readOnly: true
+                  isEEACountry:
+                    type: boolean
+                    description: Specifies whether the country the client making the request from is in the EEA
+                    readOnly: true
+                  isSupported:
+                    type: boolean
+                    description: Specifies whether BritBox is supported in the client's location
+                    readOnly: true
+                  isDeviceSupported:
+                    type: boolean
+                    description: Specifies whether the device being used is supported in the client's location
+                    readOnly: true
+                  isPortable:
+                    type: boolean
+                    description: Specifies whether the user has a portable account (only applies to EU customers)
+                  accountCountry:
+                    type: string
+                    description: The country the client's account is registered in
+                    readOnly: true
+                required:
+                  - country
+                  - isSupported
+                  - isEEACountry
+                  - isDeviceSupported
+            required:
+              - data
+
+    LocalizationResult:
+      description: Localization result
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              data:
+                additionalProperties:
+                  type: string
+            required:
+              - data
+
+    ConfigurationResult:
+      description: Configuration result
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              data:
+                properties:
+                  languages:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        languageCode:
+                          type: string
+                        labelId:
+                          type: string
+                      required:
+                        - languageCode
+                        - labelId
+                  ageRatings:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        images:
+                          type: object
+                          additionalProperties:
+                            type: string
+                            format: uri
+                        level:
+                          type: number
+                        system:
+                          type: string
+                        code:
+                          type: string
+                        advisoryTextId:
+                          type: string
+                        name:
+                          type: string
+                        group:
+                          type: string
+                      required:
+                        - level
+                        - system
+                        - code
+                        - advisoryTextId
+                        - name
+                  navigation:
+                    type: object
+                    properties:
+                      header:
+                        type: array
+                        items:
+                          $ref: "#/components/schemas/NavigationConfigNode"
+                      footer:
+                        type: array
+                        items:
+                          $ref: "#/components/schemas/NavigationConfigNode"
+                      account:
+                        type: array
+                        items:
+                          $ref: "#/components/schemas/NavigationConfigNode"
+                    required: 
+                      - header
+                      - footer
+                      - account
+                  tagsByPagePath:
+                    type: object
+                    additionalProperties:
+                      type: array
+                      items:
+                        type: string
+                  activationUrl:
+                    type: string
+                  adTagIMAUrl:
+                    type: string
+                  helpUrl:
+                    type: string
+                  mediaRoutingUrl:
+                    type: string
+                  captionsAllowed:
+                    type: array
+                  channelGuidePath:
+                    type: string
+                  channelBlackoutSeconds:
+                    type: integer
+                    minimum: 0
+                  channelScheduleHours:
+                    type: integer
+                    minimum: 0
+                  channelSubtitleStyling:
+                    type: string
+                  googleWatchNextThresholds:
+                    type: object
+                    properties:
+                      movie: &contentType
+                        type: object
+                        additionalProperties: false
+                        required:
+                          - startThreshold
+                          - endThreshold
+                        properties:
+                          startThreshold: &threshold
+                            type: object
+                            properties:
+                              relative:
+                                type: number
+                                minimum: 0
+                                maximum: 1
+                              absolute:
+                                type: integer
+                                minimum: 0
+                            required:
+                              - relative
+                              - absolute
+                          endThreshold: *threshold
+                      episode: *contentType
+                  leavingSoonThresholdDays:
+                    type: integer
+                  preRollVideoQuality:
+                    type: integer
+                    enum:
+                      - 360
+                      - 720
+                      - 1080
+                    default: 720
+                  paymentListId:
+                    type: string
+                  upsellListId:
+                    type: string
+                  upsellIndicatorAssetId:
+                    type: object
+                    additionalProperties:
+                      type: string
+                  screenIdMappings:
+                    type: object
+                    additionalProperties:
+                      type: array
+                      items:
+                        type: object
+                        properties:
+                          pagePathRegex:
+                            type: string
+                          screenId:
+                            type: integer
+                        required:
+                          - pagePathRegex
+                          - screenId
+                  serviceManagers:
+                    type: object
+                    additionalProperties:
+                      type: object
+                  tvlogoAssetId:
+                    type: string
+                  preRollVideoQualitySamsungTV2018:
+                    type: integer
+                    enum:
+                      - 360
+                      - 720
+                      - 1080
+                    default: 360
+                  marketingOptInDefaultState:
+                    type: boolean
+                  marketingOptInVisible:
+                    type: boolean
+                additionalProperties:
+                  type: string
+                required:
+                  - languages
+                  - ageRatings
+                  - navigation
+                  - tagsByPagePath
+                  - helpUrl
+                  - mediaRoutingUrl
+                  - activationUrl
+                  - captionsAllowed
+                  - paymentListId
+                  - channelGuidePath
+                  - channelBlackoutSeconds
+                  - channelScheduleHours
+                  - leavingSoonThresholdDays
+                  - adTagIMAUrl
+                  - screenIdMappings
+                  - tvlogoAssetId
+                  - preRollVideoQualitySamsungTV2018
+                  - marketingOptInDefaultState
+                  - marketingOptInVisible
+            required:
+              - data

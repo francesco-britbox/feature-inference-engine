@@ -6,7 +6,6 @@
 
 import { OpenAIClient } from '@/lib/ai/OpenAIClient';
 import { embeddingRateLimiter } from '@/lib/ai/openai';
-import { getEvidenceCollection } from '@/lib/ai/chroma';
 import { logger } from '@/lib/utils/logger';
 import type { LLMClient } from '@/lib/types/llm';
 import type { IEmbeddingStorage } from './EmbeddingStorageService';
@@ -137,77 +136,34 @@ export class EmbeddingService {
 
   /**
    * Find similar evidence using vector search
+   * DISABLED: Chroma removed due to webpack issues
+   * TODO: Implement using PostgreSQL pgvector <-> operator for cosine similarity
    * @param query Query text to search for
    * @param k Number of results (default 20)
    * @returns Array of evidence IDs with similarity scores
    */
   async findSimilar(
-    query: string,
-    k: number = DEFAULT_K_NEIGHBORS
+    _query: string,
+    _k: number = DEFAULT_K_NEIGHBORS
   ): Promise<Array<{ id: string; similarity: number }>> {
-    try {
-      // Generate embedding for query
-      const queryEmbedding = await this.generateEmbedding(query);
-
-      // Search in Chroma
-      const collection = await getEvidenceCollection();
-      const results = await collection.query({
-        queryEmbeddings: [queryEmbedding],
-        nResults: k,
-      });
-
-      // Extract results
-      const ids = results.ids[0] || [];
-      const distances = results.distances?.[0] || [];
-
-      // Convert cosine distance to similarity (1 - distance)
-      return ids.map((id, index) => ({
-        id,
-        similarity: 1 - (distances[index] || 0),
-      }));
-    } catch (error) {
-      this.log.error(
-        {
-          query,
-          k,
-          error: error instanceof Error ? error.message : String(error),
-        },
-        'Failed to find similar evidence'
-      );
-      return [];
-    }
+    this.log.warn('findSimilar() disabled - Chroma removed, needs pgvector implementation');
+    return [];
   }
 
   /**
    * Find similar evidence by evidence ID
+   * DISABLED: Chroma removed due to webpack issues
+   * TODO: Implement using PostgreSQL pgvector <-> operator for cosine similarity
    * @param evidenceId Evidence UUID
    * @param k Number of results (default 20)
    * @returns Array of similar evidence IDs with similarity scores
    */
   async findSimilarByEvidenceId(
-    evidenceId: string,
-    k: number = DEFAULT_K_NEIGHBORS
+    _evidenceId: string,
+    _k: number = DEFAULT_K_NEIGHBORS
   ): Promise<Array<{ id: string; similarity: number }>> {
-    try {
-      // Fetch evidence content via storage
-      const evidenceItem = await this.storage.getEvidenceById(evidenceId);
-
-      if (!evidenceItem) {
-        throw new Error(`Evidence ${evidenceId} not found`);
-      }
-
-      // Search using content
-      return this.findSimilar(evidenceItem.content, k);
-    } catch (error) {
-      this.log.error(
-        {
-          evidenceId,
-          error: error instanceof Error ? error.message : String(error),
-        },
-        'Failed to find similar by evidence ID'
-      );
-      return [];
-    }
+    this.log.warn('findSimilarByEvidenceId() disabled - Chroma removed, needs pgvector implementation');
+    return [];
   }
 
   /**

@@ -309,3 +309,8 @@ export class ConfidenceScorer implements IConfidenceScorer {
     };
   }
 }
+
+/**
+ * Singleton instance
+ */
+export const confidenceScorer = new ConfidenceScorer();

@@ -4,10 +4,9 @@
  * Single Responsibility: Embedding persistence only
  */
 
-import { eq } from 'drizzle-orm';
+import { eq, inArray } from 'drizzle-orm';
 import { db } from '@/lib/db/client';
 import { evidence } from '@/lib/db/schema';
-import { getEvidenceCollection } from '@/lib/ai/chroma';
 import { logger } from '@/lib/utils/logger';
 import type { Evidence } from '@/lib/types/evidence';
 
@@ -61,7 +60,7 @@ export class EmbeddingStorageService implements IEmbeddingStorage {
   async storeEmbedding(
     evidenceId: string,
     embedding: number[],
-    evidenceData: Evidence
+    _evidenceData: Evidence
   ): Promise<void> {
     try {
       // Store in PostgreSQL
@@ -70,19 +69,7 @@ export class EmbeddingStorageService implements IEmbeddingStorage {
         .set({ embedding })
         .where(eq(evidence.id, evidenceId));
 
-      // Store in Chroma
-      const collection = await getEvidenceCollection();
-      await collection.add({
-        ids: [evidenceId],
-        embeddings: [embedding],
-        documents: [evidenceData.content],
-        metadatas: [
-          {
-            document_id: evidenceData.documentId,
-            type: evidenceData.type,
-          },
-        ],
-      });
+      // Chroma disabled (webpack compatibility issue)
 
       this.log.debug({ evidenceId }, 'Embedding stored successfully');
     } catch (error) {
@@ -118,17 +105,7 @@ export class EmbeddingStorageService implements IEmbeddingStorage {
           .where(eq(evidence.id, item.id));
       }
 
-      // Store in Chroma (batch add)
-      const collection = await getEvidenceCollection();
-      await collection.add({
-        ids: items.map((item) => item.id),
-        embeddings: items.map((item) => item.embedding),
-        documents: items.map((item) => item.content),
-        metadatas: items.map((item) => ({
-          document_id: item.documentId,
-          type: item.type,
-        })),
-      });
+      // Chroma disabled (webpack compatibility issue)
 
       this.log.debug({ count: items.length }, 'Batch embeddings stored successfully');
     } catch (error) {
@@ -171,14 +148,10 @@ export class EmbeddingStorageService implements IEmbeddingStorage {
    */
   async getEvidenceByIds(evidenceIds: string[]): Promise<Evidence[]> {
     try {
-      const { sql } = await import('drizzle-orm');
-
       const evidenceItems = await db
         .select()
         .from(evidence)
-        .where(
-          sql`${evidence.id} = ANY(${evidenceIds})`
-        );
+        .where(inArray(evidence.id, evidenceIds));
 
       return evidenceItems as Evidence[];
     } catch (error) {

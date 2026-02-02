@@ -1,0 +1,6 @@
+Issue key,Issue Type,Summary,Status,Priority,Description
+OTT-101,Story,User Login,Done,High,"As a user, I want to log in with email and password so that I can access my account"
+OTT-102,Story,User Registration,Done,High,"As a user, I want to register for an account so that I can use the platform"
+OTT-103,Bug,Login fails with special characters,Open,Medium,"When user enters email with + character, login fails with 400 error"
+OTT-104,Story,Remember Me functionality,In Progress,Low,"As a user, I want a remember me option so that I don't have to log in every time"
+OTT-105,Story,Password Reset,To Do,Medium,"As a user, I want to reset my password if I forget it"

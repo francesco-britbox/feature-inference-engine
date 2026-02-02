@@ -1,0 +1,106 @@
+{
+  "info": {
+    "name": "Authentication API",
+    "description": "User authentication endpoints for OTT platform",
+    "version": "1.0.0"
+  },
+  "endpoints": [
+    {
+      "method": "POST",
+      "path": "/api/auth/login",
+      "description": "User login with email and password",
+      "request": {
+        "body": {
+          "email": {
+            "type": "string",
+            "format": "email",
+            "required": true,
+            "example": "user@example.com"
+          },
+          "password": {
+            "type": "string",
+            "minLength": 8,
+            "required": true,
+            "example": "SecurePass123"
+          },
+          "rememberMe": {
+            "type": "boolean",
+            "required": false,
+            "default": false
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "description": "Login successful",
+          "body": {
+            "token": "string",
+            "user": {
+              "id": "string",
+              "email": "string",
+              "name": "string"
+            }
+          }
+        },
+        "401": {
+          "description": "Invalid credentials",
+          "body": {
+            "error": "Invalid email or password"
+          }
+        }
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/auth/logout",
+      "description": "User logout",
+      "auth": "Bearer Token",
+      "responses": {
+        "200": {
+          "description": "Logout successful"
+        }
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/auth/register",
+      "description": "User registration",
+      "request": {
+        "body": {
+          "email": {
+            "type": "string",
+            "format": "email",
+            "required": true
+          },
+          "password": {
+            "type": "string",
+            "minLength": 8,
+            "required": true
+          },
+          "name": {
+            "type": "string",
+            "required": true
+          }
+        }
+      },
+      "responses": {
+        "201": {
+          "description": "User created",
+          "body": {
+            "user": {
+              "id": "string",
+              "email": "string",
+              "name": "string"
+            }
+          }
+        },
+        "400": {
+          "description": "Validation error",
+          "body": {
+            "error": "Email already exists"
+          }
+        }
+      }
+    }
+  ]
+}

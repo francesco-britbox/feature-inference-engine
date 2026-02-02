@@ -13,6 +13,7 @@ import { eq, and } from 'drizzle-orm';
 import { createLogger } from '@/lib/utils/logger';
 import { InvalidDataError, RetryableError } from '@/lib/utils/errors';
 import { chatRateLimiter } from '@/lib/ai/openai';
+import { openaiClient } from '@/lib/ai/OpenAIClient';
 
 const logger = createLogger({ service: 'RelationshipBuilder' });
 
@@ -443,3 +444,8 @@ export class RelationshipBuilder {
     };
   }
 }
+
+/**
+ * Singleton instance
+ */
+export const relationshipBuilder = new RelationshipBuilder(openaiClient);
