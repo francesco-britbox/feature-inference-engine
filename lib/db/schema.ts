@@ -125,6 +125,7 @@ export const features = pgTable(
     description: text('description'),
     confidenceScore: numeric('confidence_score', { precision: 3, scale: 2 }),
     status: text('status').default('candidate').notNull(),
+    platforms: jsonb('platforms').$type<string[]>().default(['web', 'ios', 'android', 'flutter', 'react-native']),
     inferredAt: timestamp('inferred_at', { withTimezone: true }).defaultNow().notNull(),
     reviewedAt: timestamp('reviewed_at', { withTimezone: true }),
     reviewedBy: text('reviewed_by'),

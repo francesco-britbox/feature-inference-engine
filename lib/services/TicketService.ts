@@ -10,6 +10,8 @@ import { eq } from 'drizzle-orm';
 import type { JiraEpic, JiraStory } from '@/lib/types/ticket';
 import type { ApiContract, RequirementsDoc, AcceptanceCriteria } from '@/lib/types/output';
 import type { EvidenceType } from '@/lib/types/evidence';
+import type { Platform } from '@/lib/types/platform';
+import { PLATFORM_NAMES, PLATFORM_TECH_STACKS } from '@/lib/types/platform';
 import { createLogger } from '@/lib/utils/logger';
 import { InvalidDataError, NotFoundError } from '@/lib/utils/errors';
 
@@ -32,12 +34,13 @@ interface EvidenceItem {
  */
 export class TicketService {
   /**
-   * Generate epic from feature
+   * Generate epic from feature with optional platform targeting
    * @param featureId Feature UUID
+   * @param platform Optional platform to target (web, ios, android, flutter, react-native)
    * @returns Complete Jira epic with stories
    */
-  async generateEpic(featureId: string): Promise<JiraEpic> {
-    logger.info({ featureId }, 'Generating epic for feature');
+  async generateEpic(featureId: string, platform?: Platform): Promise<JiraEpic> {
+    logger.info({ featureId, platform }, 'Generating epic for feature');
 
     if (!featureId) {
       throw new InvalidDataError('Feature ID is required', 'featureId');
@@ -53,26 +56,30 @@ export class TicketService {
       // Fetch evidence for story generation
       const evidenceList = await this.getEvidence(featureId);
 
-      // Generate stories from evidence
-      const stories = this.generateStories(evidenceList, feature.name);
+      // Generate stories from evidence (platform-aware)
+      const stories = this.generateStories(evidenceList, feature.name, platform);
 
       // Determine priority based on confidence score
       const priority = this.determinePriority(feature.confidenceScore);
 
+      // Build epic description with platform notes
+      const description = this.buildEpicDescription(feature, outputs, platform);
+
       // Build epic
       const epic: JiraEpic = {
         title: feature.name,
-        description: this.buildEpicDescription(feature, outputs),
+        description,
         acceptanceCriteria: outputs.acceptanceCriteria || { scenarios: [], notes: [] },
         apiContracts: outputs.apiContract,
         requirements: outputs.requirements,
         stories,
-        labels: this.extractLabels(feature),
+        labels: this.extractLabels(feature, platform),
         priority,
+        platform,
       };
 
       logger.info(
-        { featureId, storiesCount: stories.length },
+        { featureId, platform, storiesCount: stories.length },
         'Epic generated successfully'
       );
 
@@ -169,9 +176,10 @@ export class TicketService {
   }
 
   /**
-   * Build epic description
+   * Build epic description with optional platform-specific notes
    * @param feature Feature data
    * @param outputs Feature outputs
+   * @param platform Optional target platform
    * @returns Epic description
    */
   private buildEpicDescription(
@@ -180,14 +188,31 @@ export class TicketService {
       apiContract?: ApiContract;
       requirements?: RequirementsDoc;
       acceptanceCriteria?: AcceptanceCriteria;
-    }
+    },
+    platform?: Platform
   ): string {
     const parts: string[] = [];
+
+    // Platform targeting note
+    if (platform) {
+      parts.push(`**Target Platform**: ${PLATFORM_NAMES[platform]}`);
+      parts.push('');
+    }
 
     // Feature description
     if (feature.description) {
       parts.push(feature.description);
       parts.push('');
+    }
+
+    // Platform-specific tech stack
+    if (platform) {
+      const techStack = PLATFORM_TECH_STACKS[platform];
+      if (techStack && techStack.length > 0) {
+        parts.push('## Technology Stack');
+        parts.push(techStack.join(', '));
+        parts.push('');
+      }
     }
 
     // Requirements summary
@@ -210,12 +235,17 @@ export class TicketService {
   }
 
   /**
-   * Generate stories from evidence
+   * Generate stories from evidence with optional platform targeting
    * @param evidenceList Evidence items
    * @param featureName Feature name for context
+   * @param platform Optional target platform
    * @returns Generated stories
    */
-  private generateStories(evidenceList: EvidenceItem[], featureName: string): JiraStory[] {
+  private generateStories(
+    evidenceList: EvidenceItem[],
+    featureName: string,
+    platform?: Platform
+  ): JiraStory[] {
     // Group evidence by type
     const grouped = this.groupEvidenceByType(evidenceList);
 
@@ -223,12 +253,16 @@ export class TicketService {
 
     // Generate UI story if we have UI elements
     if (grouped.ui_element.length > 0) {
+      const uiTitle = platform
+        ? `${featureName} - ${PLATFORM_NAMES[platform]} UI Implementation`
+        : `${featureName} - User Interface`;
+
       stories.push({
-        title: `${featureName} - User Interface`,
-        description: this.buildUiStoryDescription(grouped.ui_element),
+        title: uiTitle,
+        description: this.buildUiStoryDescription(grouped.ui_element, platform),
         acceptanceCriteria: this.buildUiAcceptanceCriteria(grouped.ui_element),
         storyPoints: this.estimateStoryPoints(grouped.ui_element),
-        labels: ['ui', 'frontend'],
+        labels: platform ? ['ui', 'frontend', platform] : ['ui', 'frontend'],
         priority: 'High',
         evidenceIds: grouped.ui_element.map((e) => e.id),
       });
@@ -310,14 +344,23 @@ export class TicketService {
   }
 
   /**
-   * Build UI story description
+   * Build UI story description with optional platform-specific notes
    */
-  private buildUiStoryDescription(items: EvidenceItem[]): string {
+  private buildUiStoryDescription(items: EvidenceItem[], platform?: Platform): string {
     const parts = [
       'Implement user interface components for this feature.',
       '',
-      '## UI Elements',
     ];
+
+    // Add platform-specific tech stack
+    if (platform) {
+      const techStack = PLATFORM_TECH_STACKS[platform];
+      parts.push(`**Platform**: ${PLATFORM_NAMES[platform]}`);
+      parts.push(`**Tech Stack**: ${techStack.join(', ')}`);
+      parts.push('');
+    }
+
+    parts.push('## UI Elements');
 
     for (const item of items) {
       parts.push(`- ${item.content}`);
@@ -436,12 +479,18 @@ export class TicketService {
   }
 
   /**
-   * Extract labels from feature metadata
+   * Extract labels from feature metadata with optional platform label
    * @param feature Feature data
+   * @param platform Optional target platform
    * @returns Labels array
    */
-  private extractLabels(feature: { name: string }): string[] {
+  private extractLabels(feature: { name: string }, platform?: Platform): string[] {
     const labels: string[] = [];
+
+    // Add platform label
+    if (platform) {
+      labels.push(platform);
+    }
 
     // Add labels based on feature name
     const name = feature.name.toLowerCase();

@@ -5,9 +5,10 @@
  */
 
 import type { ApiContract, RequirementsDoc, AcceptanceCriteria } from './output';
+import type { Platform } from './platform';
 
 /**
- * Jira epic format (platform-agnostic)
+ * Jira epic format with optional platform targeting
  */
 export interface JiraEpic {
   title: string;
@@ -18,6 +19,7 @@ export interface JiraEpic {
   stories: JiraStory[];
   labels?: string[];
   priority?: 'Highest' | 'High' | 'Medium' | 'Low' | 'Lowest';
+  platform?: Platform;
 }
 
 /**

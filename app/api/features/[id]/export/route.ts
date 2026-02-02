@@ -8,14 +8,15 @@ import { NextRequest, NextResponse } from 'next/server';
 import { TicketService } from '@/lib/services/TicketService';
 import { ExportService } from '@/lib/services/ExportService';
 import type { ExportFormat } from '@/lib/types/ticket';
+import type { Platform } from '@/lib/types/platform';
 import { createLogger } from '@/lib/utils/logger';
 import { InvalidDataError, NotFoundError } from '@/lib/utils/errors';
 
 const logger = createLogger({ service: 'ExportAPI' });
 
 /**
- * GET /api/features/:id/export?format=json|md|csv
- * Export feature as Jira epic in specified format
+ * GET /api/features/:id/export?format=json|md|csv&platform=ios
+ * Export feature as Jira epic in specified format with optional platform targeting
  */
 export async function GET(
   request: NextRequest,
@@ -32,10 +33,12 @@ export async function GET(
       throw new InvalidDataError('Feature ID is required', 'featureId');
     }
 
-    // Get format from query parameter
+    // Get query parameters
     const searchParams = request.nextUrl.searchParams;
     const format = searchParams.get('format') as ExportFormat | null;
+    const platformParam = searchParams.get('platform') as Platform | null;
 
+    // Validate format
     if (!format || !['json', 'md', 'csv'].includes(format)) {
       throw new InvalidDataError(
         'Format must be one of: json, md, csv',
@@ -43,20 +46,33 @@ export async function GET(
       );
     }
 
-    // Generate epic
+    // Validate platform (optional)
+    let platform: Platform | undefined;
+    if (platformParam) {
+      const validPlatforms: Platform[] = ['web', 'ios', 'android', 'flutter', 'react-native'];
+      if (!validPlatforms.includes(platformParam)) {
+        throw new InvalidDataError(
+          'Platform must be one of: web, ios, android, flutter, react-native',
+          'platform'
+        );
+      }
+      platform = platformParam;
+    }
+
+    // Generate epic with optional platform
     const ticketService = new TicketService();
-    const epic = await ticketService.generateEpic(featureId);
+    const epic = await ticketService.generateEpic(featureId, platform);
 
     // Export to requested format
     const exportService = new ExportService();
     const exported = exportService.exportEpic(epic, format);
 
-    // Determine content type and filename
+    // Determine content type and filename (with platform suffix if specified)
     const contentType = getContentType(format);
-    const filename = getFilename(epic.title, format);
+    const filename = getFilename(epic.title, format, platform);
 
     logger.info(
-      { featureId, format, filename },
+      { featureId, format, platform, filename },
       'Export successful'
     );
 
@@ -117,17 +133,19 @@ function getContentType(format: ExportFormat): string {
 }
 
 /**
- * Get filename for export
+ * Get filename for export with optional platform suffix
  * @param epicTitle Epic title
  * @param format Export format
+ * @param platform Optional platform
  * @returns Filename
  */
-function getFilename(epicTitle: string, format: ExportFormat): string {
+function getFilename(epicTitle: string, format: ExportFormat, platform?: Platform): string {
   const sanitized = epicTitle
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/^-+|-+$/g, '');
 
+  const platformSuffix = platform ? `-${platform}` : '';
   const extension = format === 'md' ? 'md' : format;
-  return `${sanitized}.${extension}`;
+  return `${sanitized}${platformSuffix}.${extension}`;
 }
