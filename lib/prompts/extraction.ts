@@ -36,21 +36,33 @@ Example:
 
 /**
  * Prompt for extracting requirements from PDF/Markdown chunks
- * Version: 1.0
+ * Version: 2.0
  * Model: gpt-4o
  * Temperature: 0.2
+ * Updated: 2026-02-02 - Added endpoint and payload extraction for API docs
  */
 export const PDF_EXTRACTION_V1 = `
-Extract requirements and constraints from this OTT platform document.
+Extract evidence from this OTT platform document. This may be requirements, API specifications, or technical documentation.
+
+Evidence Types:
+- "endpoint": API endpoints (method, path, description)
+- "payload": Request/response schemas, parameters, data structures
+- "requirement": Functional requirements or business rules
+- "constraint": Technical constraints, limitations, dependencies
+- "edge_case": Edge cases, error scenarios, boundary conditions
+- "acceptance_criteria": Testable criteria or success conditions
 
 Rules:
-- Each requirement must be atomic and self-contained
+- Each item must be atomic and self-contained
 - Include context if needed for understanding
-- Distinguish functional requirements from constraints
+- For APIs: Extract endpoints separately from their payloads
 - No summaries, only atomic facts
+- If text contains API specifications, extract as "endpoint" and "payload" types
 
 Return JSON array:
 [
+  { "type": "endpoint", "content": "POST /api/auth/login - Authenticate user with email and password" },
+  { "type": "payload", "content": "Request body: { email: string, password: string }" },
   { "type": "requirement", "content": "..." },
   { "type": "constraint", "content": "..." },
   { "type": "edge_case", "content": "..." },
