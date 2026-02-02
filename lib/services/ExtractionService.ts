@@ -12,6 +12,7 @@ import { jiraExtractor } from './extractors/JiraExtractor';
 import { pdfExtractor } from './extractors/PdfExtractor';
 import { documentStatusService } from './DocumentStatusService';
 import { evidenceStorageService } from './EvidenceStorageService';
+import { activityLogService } from './ActivityLogService';
 import type { Extractor } from '@/lib/types/evidence';
 import type { FileType } from '@/lib/types/document';
 import type { IExtractionService } from '@/lib/types/services';
@@ -51,6 +52,13 @@ export class ExtractionService implements IExtractionService {
       // Update status to processing (using dedicated service)
       await documentStatusService.markProcessing(documentId);
 
+      // Log activity
+      activityLogService.addLog(
+        'info',
+        `Processing: ${document.filename}`,
+        { documentId }
+      );
+
       // Route to appropriate extractor
       const extractor = EXTRACTOR_MAP.get(document.fileType as FileType);
 
@@ -71,12 +79,26 @@ export class ExtractionService implements IExtractionService {
       // Update document status to completed (using dedicated service)
       await documentStatusService.markCompleted(documentId);
 
+      // Log success
+      activityLogService.addLog(
+        'success',
+        `✅ Completed: ${document.filename} (${count} items)`,
+        { documentId }
+      );
+
       this.log.info({ documentId, count }, 'Extraction completed');
       return count;
     } catch (error) {
       // Update document status to failed (using dedicated service)
       const errorMessage = error instanceof Error ? error.message : String(error);
       await documentStatusService.markFailed(documentId, errorMessage);
+
+      // Log error
+      activityLogService.addLog(
+        'error',
+        `❌ Failed: ${errorMessage}`,
+        { documentId }
+      );
 
       this.log.error({ documentId, error: errorMessage }, 'Extraction failed');
 

@@ -6,6 +6,8 @@ import { FileText, Database, Layers, Clock, CheckCircle, XCircle, Loader2, Arrow
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { ActivityMonitor } from '@/components/ActivityMonitor';
+import { startAutoProcessor } from '@/lib/workers/autoProcessor';
 
 interface SystemStats {
   documents: {
@@ -42,6 +44,10 @@ export default function StatusPage() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    // Start automatic queue processor
+    startAutoProcessor();
+
+    // Fetch stats every 5 seconds
     fetchStats();
     const interval = setInterval(fetchStats, 5000);
     return () => clearInterval(interval);
@@ -52,7 +58,8 @@ export default function StatusPage() {
       const response = await fetch('/api/stats');
       const data = await response.json();
       setStats(data);
-    } catch {
+    } catch (error) {
+      console.error('Failed to fetch system stats:', error);
       // Error fetching stats - will show failed state
       setStats(null);
     } finally {
@@ -261,6 +268,9 @@ export default function StatusPage() {
           </CardContent>
         </Card>
       </div>
+
+      {/* Live Activity Monitor */}
+      <ActivityMonitor />
     </div>
   );
 }
