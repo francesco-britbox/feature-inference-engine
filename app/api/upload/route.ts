@@ -17,6 +17,7 @@ import {
 import { AppError, DuplicateFileError } from '@/lib/utils/errors';
 import type { UploadResult } from '@/lib/types/upload';
 import type { DocumentMetadata } from '@/lib/types/document';
+import { activityLogService } from '@/lib/services/ActivityLogService';
 
 /**
  * Batch upload limits from environment
@@ -232,6 +233,9 @@ async function processFile(
 
     // Create processing job
     await queueService.createJob(documentId, 'extract');
+
+    // Log upload success
+    activityLogService.addLog('success', `📤 Uploaded: ${filename}`, { documentId });
 
     // Add to successes
     result.successes.push({

@@ -13,6 +13,7 @@ import { buildPdfExtractionPrompt } from '@/lib/prompts/extraction';
 import type { Evidence, Extractor, ExtractedEvidence } from '@/lib/types/evidence';
 import type { LLMClient } from '@/lib/types/llm';
 import { logger } from '@/lib/utils/logger';
+import { activityLogService } from '@/lib/services/ActivityLogService';
 
 /**
  * Maximum tokens per chunk (approximation)
@@ -94,12 +95,28 @@ export class PdfExtractor implements Extractor {
           'Processing chunk'
         );
 
+        // Log chunk progress to activity feed
+        activityLogService.addLog(
+          'info',
+          `📄 Processing chunk ${i + 1}/${chunks.length}...`,
+          { documentId }
+        );
+
         const chunkEvidence = await this.extractFromChunk(chunk, documentId);
 
         this.log.debug(
           { documentId, chunkIndex: i, evidenceCount: chunkEvidence.length },
           'Chunk processed'
         );
+
+        // Log chunk completion with evidence count
+        if (chunkEvidence.length > 0) {
+          activityLogService.addLog(
+            'success',
+            `✅ Chunk ${i + 1}/${chunks.length}: Found ${chunkEvidence.length} items`,
+            { documentId }
+          );
+        }
 
         allEvidence.push(...chunkEvidence);
       }
@@ -195,12 +212,16 @@ export class PdfExtractor implements Extractor {
         'Calling LLM for extraction'
       );
 
+      // Log API call to activity feed
+      activityLogService.addLog('info', `🤖 Calling ChatGPT...`, { documentId });
+
       // Call LLM with rate limiting (uses abstraction, not concrete OpenAI)
       const response = await chatRateLimiter.schedule(() =>
         this.llmClient.chat({
           model: 'gpt-4o',
           messages: [{ role: 'user', content: prompt }],
           temperature: 0.2,
+          maxTokens: 4000,
           responseFormat: { type: 'json_object' },
         })
       );

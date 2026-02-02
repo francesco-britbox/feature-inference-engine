@@ -10,6 +10,7 @@ import type { Evidence } from '@/lib/types/evidence';
 import { validateEvidenceRawData } from '@/lib/utils/validation';
 import { logger } from '@/lib/utils/logger';
 import { InvalidDataError } from '@/lib/utils/errors';
+import { activityLogService } from './ActivityLogService';
 
 /**
  * Service for storing evidence
@@ -51,6 +52,16 @@ export class EvidenceStorageService {
         { count: evidenceItems.length },
         'Evidence stored successfully'
       );
+
+      // Log to activity feed
+      if (evidenceItems.length > 0) {
+        const documentId = evidenceItems[0]?.documentId;
+        activityLogService.addLog(
+          'success',
+          `💾 Stored ${evidenceItems.length} evidence items`,
+          { documentId }
+        );
+      }
 
       return evidenceItems.length;
     } catch (error) {

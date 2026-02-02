@@ -9,6 +9,7 @@ import { db } from '@/lib/db/client';
 import { processingJobs, documents } from '@/lib/db/schema';
 import { QueueError } from '@/lib/utils/errors';
 import type { JobType, QueueOptions } from '@/lib/types/queue';
+import { activityLogService } from './ActivityLogService';
 
 /**
  * Default queue options from environment
@@ -48,6 +49,9 @@ export class QueueService {
       if (!job) {
         throw new QueueError('Failed to create processing job');
       }
+
+      // Log job queued
+      activityLogService.addLog('info', `📋 Queued for processing`, { documentId, jobId: job.id });
 
       return job.id;
     } catch (error) {
@@ -127,6 +131,19 @@ export class QueueService {
 
       return job.id;
     } catch (error) {
+      const errorMsg = error instanceof Error ? error.message : String(error);
+
+      // Log timeout or error
+      if (errorMsg.includes('timeout')) {
+        const [jobData] = await db.select().from(processingJobs).where(eq(processingJobs.id, job.id));
+        const retryNum = (jobData?.retryCount || 0) + 1;
+        activityLogService.addLog(
+          'warning',
+          `⏱️ Timeout after ${this.options.timeout / 1000}s (attempt ${retryNum} of ${this.options.maxRetries})`,
+          { documentId: job.documentId, jobId: job.id }
+        );
+      }
+
       await this.handleJobFailure(job.id, job.documentId, error as Error);
       return job.id;
     } finally {
@@ -182,6 +199,13 @@ export class QueueService {
         .update(documents)
         .set({ status: 'uploaded' })
         .where(eq(documents.id, documentId));
+
+      // Log retry
+      activityLogService.addLog(
+        'warning',
+        `🔄 Retrying (attempt ${job.retryCount + 2} of ${job.maxRetries + 1})`,
+        { documentId, jobId }
+      );
     } else {
       // Max retries exceeded, mark as failed
       await db

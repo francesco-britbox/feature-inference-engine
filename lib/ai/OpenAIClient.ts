@@ -14,6 +14,7 @@ import type {
 } from '@/lib/types/llm';
 import { ConfigurationError, RateLimitError, TimeoutError } from '@/lib/utils/errors';
 import { logger } from '@/lib/utils/logger';
+import { activityLogService } from '@/lib/services/ActivityLogService';
 
 /**
  * OpenAI Client implementation
@@ -135,6 +136,7 @@ export class OpenAIClient implements LLMClient {
       // Rate limit error
       if ('status' in error && (error as { status: number }).status === 429) {
         logger.warn({ error: error.message }, 'OpenAI rate limit hit');
+        activityLogService.addLog('warning', '⏸️ Rate limited by OpenAI, waiting to resume...');
         return new RateLimitError();
       }
 
