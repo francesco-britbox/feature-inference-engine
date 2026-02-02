@@ -110,3 +110,13 @@ export class TimeoutError extends RetryableError {
     this.statusCode = 504;
   }
 }
+
+/**
+ * Not found error - resource does not exist
+ */
+export class NotFoundError extends AppError {
+  constructor(resourceType: string, public resourceId: string) {
+    super(`${resourceType} not found: ${resourceId}`, 'NOT_FOUND', 404);
+    this.resourceId = resourceId;
+  }
+}
