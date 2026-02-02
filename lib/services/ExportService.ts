@@ -80,6 +80,7 @@ export class ExportService {
               storyPoints: story.storyPoints,
               acceptanceCriteria: story.acceptanceCriteria.join('\n'),
               epicLink: epic.title,
+              subtasks: story.subtasks || [],
             })),
           ],
         },
@@ -180,6 +181,18 @@ export class ExportService {
         lines.push('**Acceptance Criteria**:');
         for (const criterion of story.acceptanceCriteria) {
           lines.push(`- ${criterion}`);
+        }
+        lines.push('');
+      }
+
+      // Add subtasks if present
+      if (story.subtasks && story.subtasks.length > 0) {
+        lines.push('**Subtasks**:');
+        for (const subtask of story.subtasks) {
+          lines.push(`- [ ] ${subtask.title} (${subtask.timeEstimate})`);
+          if (subtask.description) {
+            lines.push(`  - ${subtask.description}`);
+          }
         }
         lines.push('');
       }

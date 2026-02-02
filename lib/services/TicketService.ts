@@ -12,6 +12,8 @@ import type { ApiContract, RequirementsDoc, AcceptanceCriteria } from '@/lib/typ
 import type { EvidenceType } from '@/lib/types/evidence';
 import type { Platform } from '@/lib/types/platform';
 import { PLATFORM_NAMES, PLATFORM_TECH_STACKS } from '@/lib/types/platform';
+import { SubtaskGenerator } from './SubtaskGenerator';
+import { openaiClient } from '@/lib/ai/OpenAIClient';
 import { createLogger } from '@/lib/utils/logger';
 import { InvalidDataError, NotFoundError } from '@/lib/utils/errors';
 
@@ -33,6 +35,11 @@ interface EvidenceItem {
  * Generates Jira-compatible epics and stories from features
  */
 export class TicketService {
+  private subtaskGenerator: SubtaskGenerator;
+
+  constructor() {
+    this.subtaskGenerator = new SubtaskGenerator(openaiClient);
+  }
   /**
    * Generate epic from feature with optional platform targeting
    * @param featureId Feature UUID
@@ -57,7 +64,7 @@ export class TicketService {
       const evidenceList = await this.getEvidence(featureId);
 
       // Generate stories from evidence (platform-aware)
-      const stories = this.generateStories(evidenceList, feature.name, platform);
+      const stories = await this.generateStories(evidenceList, feature.name, platform);
 
       // Determine priority based on confidence score
       const priority = this.determinePriority(feature.confidenceScore);
@@ -235,17 +242,17 @@ export class TicketService {
   }
 
   /**
-   * Generate stories from evidence with optional platform targeting
+   * Generate stories from evidence with optional platform targeting and subtasks
    * @param evidenceList Evidence items
    * @param featureName Feature name for context
    * @param platform Optional target platform
-   * @returns Generated stories
+   * @returns Generated stories with subtasks
    */
-  private generateStories(
+  private async generateStories(
     evidenceList: EvidenceItem[],
     featureName: string,
     platform?: Platform
-  ): JiraStory[] {
+  ): Promise<JiraStory[]> {
     // Group evidence by type
     const grouped = this.groupEvidenceByType(evidenceList);
 
@@ -307,6 +314,26 @@ export class TicketService {
         priority: 'Medium',
         evidenceIds: grouped.flow.map((e) => e.id),
       });
+    }
+
+    // Generate subtasks for each story if platform is specified
+    if (platform) {
+      for (const story of stories) {
+        try {
+          const subtasks = await this.subtaskGenerator.generateSubtasks(story, platform);
+          story.subtasks = subtasks;
+        } catch (error) {
+          logger.warn(
+            {
+              storyTitle: story.title,
+              platform,
+              error: error instanceof Error ? error.message : String(error),
+            },
+            'Failed to generate subtasks for story, continuing without subtasks'
+          );
+          // Continue without subtasks (not critical for epic generation)
+        }
+      }
     }
 
     logger.debug({ storiesCount: stories.length }, 'Stories generated');

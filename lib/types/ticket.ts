@@ -23,12 +23,23 @@ export interface JiraEpic {
 }
 
 /**
- * Jira story format (platform-agnostic)
+ * Jira subtask format
+ */
+export interface JiraSubtask {
+  title: string;
+  description: string;
+  timeEstimate: string;
+  assignee?: string;
+}
+
+/**
+ * Jira story format with subtasks
  */
 export interface JiraStory {
   title: string;
   description: string;
   acceptanceCriteria: string[];
+  subtasks?: JiraSubtask[];
   storyPoints?: number;
   labels?: string[];
   priority?: 'Highest' | 'High' | 'Medium' | 'Low' | 'Lowest';
