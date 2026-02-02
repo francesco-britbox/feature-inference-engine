@@ -61,8 +61,8 @@ export default function SettingsPage(): JSX.Element {
   };
 
   const handleDeleteAll = async (): Promise<void> => {
-    if (confirmText !== 'DELETE ALL DATA') {
-      alert('Please type the confirmation text exactly: DELETE ALL DATA');
+    if (confirmText !== 'Delete') {
+      alert('Please type the confirmation text exactly: Delete');
       return;
     }
 
@@ -190,14 +190,14 @@ export default function SettingsPage(): JSX.Element {
               <p className="text-sm font-medium">
                 Type{' '}
                 <code className="bg-red-100 px-2 py-1 rounded font-mono text-red-900 font-bold">
-                  DELETE ALL DATA
+                  Delete
                 </code>{' '}
                 to confirm:
               </p>
               <Input
                 value={confirmText}
                 onChange={(e) => setConfirmText(e.target.value)}
-                placeholder="Type confirmation text..."
+                placeholder="Type 'Delete'..."
                 className="border-red-300 focus-visible:ring-red-500"
                 disabled={deleting}
               />
@@ -205,7 +205,7 @@ export default function SettingsPage(): JSX.Element {
 
             <Button
               variant="destructive"
-              disabled={confirmText !== 'DELETE ALL DATA' || deleting}
+              disabled={confirmText !== 'Delete' || deleting}
               onClick={handleDeleteAll}
               className="w-full"
             >

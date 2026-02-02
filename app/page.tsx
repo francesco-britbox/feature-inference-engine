@@ -16,13 +16,14 @@ import {
   Activity,
   Database,
   Layers,
+  Package,
+  FileStack,
+  Settings,
 } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Progress } from '@/components/ui/progress';
-import { QuickExportSection } from '@/components/QuickExportSection';
-import type { Feature } from '@/lib/types/feature';
 
 interface ApiStats {
   documents: {
@@ -65,12 +66,10 @@ export default function Home() {
   });
   const [loading, setLoading] = useState(true);
   const [systemHealthy, setSystemHealthy] = useState(false);
-  const [topFeatures, setTopFeatures] = useState<Feature[]>([]);
 
   useEffect(() => {
     fetchStats();
     checkHealth();
-    fetchTopFeatures();
   }, []);
 
   const fetchStats = async () => {
@@ -101,16 +100,6 @@ export default function Home() {
     }
   };
 
-  const fetchTopFeatures = async () => {
-    try {
-      const response = await fetch('/api/features?status=confirmed&limit=3');
-      if (!response.ok) return;
-      const data: Feature[] = await response.json();
-      setTopFeatures(data);
-    } catch {
-      // Silent fail - UI will not show Quick Export section
-    }
-  };
 
   const quickActions = [
     {
@@ -157,12 +146,36 @@ export default function Home() {
       color: 'text-green-600',
     },
     {
+      icon: Package,
+      title: 'Jira Generation',
+      description: 'Generate epics, stories, and subtasks',
+      href: '/jira',
+      stats: 'Wizard',
+      color: 'text-blue-600',
+    },
+    {
+      icon: FileStack,
+      title: 'Documents',
+      description: 'Manage uploaded documents',
+      href: '/documents',
+      stats: `${stats.documents} files`,
+      color: 'text-purple-600',
+    },
+    {
       icon: Activity,
       title: 'Status',
       description: 'Monitor processing status and jobs',
       href: '/status',
       stats: systemHealthy ? 'Healthy' : 'Checking...',
       color: 'text-blue-600',
+    },
+    {
+      icon: Settings,
+      title: 'Settings',
+      description: 'System configuration and danger zone',
+      href: '/settings',
+      stats: 'Admin',
+      color: 'text-gray-600',
     },
     {
       icon: Layers,
@@ -407,8 +420,6 @@ export default function Home() {
         </Card>
       )}
 
-      {/* Quick Export */}
-      <QuickExportSection features={topFeatures} />
 
       {/* Getting Started */}
       {stats.documents === 0 && (

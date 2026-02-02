@@ -26,7 +26,7 @@ const logger = createLogger({ service: 'SystemResetAPI' });
 /**
  * POST /api/system/reset
  * Deletes ALL data from database and file storage
- * Requires exact confirmation text: "DELETE ALL DATA"
+ * Requires exact confirmation text: "Delete"
  */
 export async function POST(request: NextRequest): Promise<NextResponse> {
   logger.warn('System reset requested');
@@ -36,10 +36,10 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     const body = (await request.json()) as { confirmation: string };
 
     // Verify exact confirmation text
-    if (body.confirmation !== 'DELETE ALL DATA') {
+    if (body.confirmation !== 'Delete') {
       logger.warn({ confirmation: body.confirmation }, 'Invalid confirmation text');
       throw new InvalidDataError(
-        'Invalid confirmation text. Must be exactly: DELETE ALL DATA',
+        'Invalid confirmation text. Must be exactly: Delete',
         'confirmation'
       );
     }
