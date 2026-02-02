@@ -36,7 +36,7 @@ export class ClusteringService {
    * @param documentIds Optional filter by document IDs
    * @returns Array of clusters with evidence IDs
    */
-  async clusterEvidence(_documentIds?: string[]): Promise<EvidenceCluster[]> {
+  async clusterEvidence(): Promise<EvidenceCluster[]> {
     try {
       // Fetch evidence with embeddings
       const evidenceItems = await db

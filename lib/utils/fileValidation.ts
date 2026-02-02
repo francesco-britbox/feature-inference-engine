@@ -181,3 +181,67 @@ export async function validateFile(
 
   return { valid: true };
 }
+
+/**
+ * Client-side file upload validation
+ * Used by upload page components
+ */
+
+import { FILE_UPLOAD_LIMITS } from '@/lib/constants/ui';
+
+export interface ClientFileValidationError {
+  type: 'count' | 'size' | 'type';
+  message: string;
+}
+
+export interface ClientFileValidationResult {
+  valid: boolean;
+  error?: ClientFileValidationError;
+}
+
+/**
+ * Validates a batch of files for upload (client-side)
+ * @param files - Array of File objects to validate
+ * @returns Validation result with error details if invalid
+ */
+export function validateFileUpload(files: File[]): ClientFileValidationResult {
+  // Validate file count
+  if (files.length > FILE_UPLOAD_LIMITS.MAX_FILES) {
+    return {
+      valid: false,
+      error: {
+        type: 'count',
+        message: `Maximum ${FILE_UPLOAD_LIMITS.MAX_FILES} files allowed per batch`,
+      },
+    };
+  }
+
+  // Validate total size
+  const totalSize = files.reduce((sum, f) => sum + f.size, 0);
+  if (totalSize > FILE_UPLOAD_LIMITS.MAX_SIZE_BYTES) {
+    return {
+      valid: false,
+      error: {
+        type: 'size',
+        message: `Total size exceeds ${FILE_UPLOAD_LIMITS.MAX_SIZE_MB}MB limit`,
+      },
+    };
+  }
+
+  return { valid: true };
+}
+
+/**
+ * Formats file size to human-readable string
+ * @param bytes - File size in bytes
+ * @returns Formatted size string (e.g., "2.5 MB")
+ */
+export function formatFileSize(bytes: number): string {
+  if (bytes < 1024) {
+    return `${bytes} B`;
+  } else if (bytes < 1024 * 1024) {
+    return `${(bytes / 1024).toFixed(2)} KB`;
+  } else {
+    return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
+  }
+}
