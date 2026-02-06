@@ -133,6 +133,11 @@ export const features = pgTable(
     enrichedAt: timestamp('enriched_at', { withTimezone: true }),
     enrichmentError: text('enrichment_error'),
     metadata: jsonb('metadata'),
+
+    // Feature hierarchy fields
+    featureType: text('feature_type').default('epic').notNull(),
+    parentId: uuid('parent_id'),
+    hierarchyLevel: integer('hierarchy_level').default(0).notNull(),
   },
   (table) => ({
     checkStatus: check(
@@ -146,6 +151,29 @@ export const features = pgTable(
     checkEnrichmentStatus: check(
       'check_enrichment_status',
       sql`${table.enrichmentStatus} IN ('pending', 'enriching', 'completed', 'failed', 'skipped')`
+    ),
+    checkFeatureType: check(
+      'check_feature_type',
+      sql`${table.featureType} IN ('epic', 'story', 'task')`
+    ),
+    checkHierarchyLevel: check(
+      'check_hierarchy_level',
+      sql`${table.hierarchyLevel} >= 0 AND ${table.hierarchyLevel} <= 2`
+    ),
+    checkNotSelfParent: check(
+      'check_not_self_parent',
+      sql`${table.parentId} != ${table.id} OR ${table.parentId} IS NULL`
+    ),
+    checkTypeLevelConsistency: check(
+      'check_type_level_consistency',
+      sql`(${table.featureType} = 'epic' AND ${table.hierarchyLevel} = 0) OR
+          (${table.featureType} = 'story' AND ${table.hierarchyLevel} = 1) OR
+          (${table.featureType} = 'task' AND ${table.hierarchyLevel} = 2)`
+    ),
+    checkEpicNoParent: check(
+      'check_epic_no_parent',
+      sql`(${table.featureType} = 'epic' AND ${table.parentId} IS NULL) OR
+          (${table.featureType} != 'epic' AND ${table.parentId} IS NOT NULL)`
     ),
   })
 );

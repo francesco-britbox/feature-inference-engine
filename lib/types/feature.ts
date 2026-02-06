@@ -4,6 +4,8 @@
 
 export type FeatureStatus = 'candidate' | 'confirmed' | 'rejected';
 
+export type FeatureType = 'epic' | 'story' | 'task';
+
 export type RelationshipType = 'implements' | 'supports' | 'constrains' | 'extends';
 
 export interface Feature {
@@ -16,6 +18,18 @@ export interface Feature {
   reviewedAt?: Date;
   reviewedBy?: string;
   metadata?: Record<string, unknown>;
+
+  // Hierarchy fields
+  featureType: FeatureType;
+  parentId?: string | null;
+  hierarchyLevel: number;
+}
+
+export interface FeatureWithHierarchy extends Feature {
+  parent?: Feature | null;
+  children: Feature[];
+  ancestors: Feature[]; // Full ancestry path [grandparent, parent]
+  descendants: Feature[]; // All nested children/grandchildren
 }
 
 export interface FeatureHypothesis {
