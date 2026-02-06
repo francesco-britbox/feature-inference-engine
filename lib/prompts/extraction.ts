@@ -36,40 +36,76 @@ Example:
 
 /**
  * Prompt for extracting requirements from PDF/Markdown chunks
- * Version: 2.0
+ * Version: 3.0
  * Model: gpt-4o
  * Temperature: 0.2
- * Updated: 2026-02-02 - Added endpoint and payload extraction for API docs
+ * Updated: 2026-02-06 - Added inference guidelines and fixed JSON format for json_object mode
  */
 export const PDF_EXTRACTION_V1 = `
-Extract evidence from this OTT platform document. This may be requirements, API specifications, or technical documentation.
+You are analyzing an OTT (Over-The-Top) platform document to extract atomic evidence.
 
-Evidence Types:
-- "endpoint": API endpoints (method, path, description)
-- "payload": Request/response schemas, parameters, data structures
-- "requirement": Functional requirements or business rules
-- "constraint": Technical constraints, limitations, dependencies
-- "edge_case": Edge cases, error scenarios, boundary conditions
-- "acceptance_criteria": Testable criteria or success conditions
+INFERENCE GUIDELINES - How to identify each evidence type:
 
-Rules:
-- Each item must be atomic and self-contained
-- Include context if needed for understanding
-- For APIs: Extract endpoints separately from their payloads
-- No summaries, only atomic facts
-- If text contains API specifications, extract as "endpoint" and "payload" types
+1. "endpoint" - API endpoints:
+   - Lines showing HTTP methods: GET, POST, PUT, DELETE, PATCH
+   - URL paths like /api/auth/login, /v1/users/{id}
+   - API route definitions or endpoint documentation
+   - Example indicators: "GET /api/", "POST /v1/", "endpoint:", "route:"
 
-Return JSON array:
-[
-  { "type": "endpoint", "content": "POST /api/auth/login - Authenticate user with email and password" },
-  { "type": "payload", "content": "Request body: { email: string, password: string }" },
-  { "type": "requirement", "content": "..." },
-  { "type": "constraint", "content": "..." },
-  { "type": "edge_case", "content": "..." },
-  { "type": "acceptance_criteria", "content": "..." }
-]
+2. "payload" - Request/response data structures:
+   - JSON schemas showing request/response format
+   - Parameter lists (query params, headers, body fields)
+   - Data type definitions (User, Video, Subscription)
+   - Example indicators: "Request:", "Response:", "Parameters:", "{", "schema"
 
-Text:
+3. "requirement" - Functional requirements:
+   - Statements about user capabilities: "User must be able to..."
+   - Business rules: "The system shall..."
+   - Feature descriptions: "Users can search for content"
+   - Example indicators: "must", "shall", "should", "can", "allows"
+
+4. "constraint" - Technical constraints:
+   - Limitations: "Maximum 100 items", "Not supported on iOS 12"
+   - Dependencies: "Requires authentication", "Only for premium users"
+   - Technical restrictions or boundaries
+   - Example indicators: "maximum", "minimum", "requires", "only", "not supported"
+
+5. "edge_case" - Error scenarios and edge conditions:
+   - Error handling: "If token expires...", "When network fails..."
+   - Boundary conditions: "Empty list", "Invalid input", "Timeout"
+   - Failure modes and fallback behavior
+   - Example indicators: "if", "when", "error", "fail", "invalid", "timeout"
+
+6. "acceptance_criteria" - Testable success criteria:
+   - Given/When/Then scenarios
+   - Testable conditions: "Login succeeds when..."
+   - Success/failure conditions
+   - Example indicators: "given", "when", "then", "succeeds", "fails"
+
+EXTRACTION RULES:
+- Extract ONLY if you can confidently identify the type using guidelines above
+- Each item must be atomic and self-contained (understandable in isolation)
+- For APIs: Extract each endpoint separately, then extract its request/response as separate payload items
+- If a sentence doesn't clearly match any type, skip it (don't guess or force-fit)
+- Return empty evidence array if no clear matches found in text
+
+OUTPUT FORMAT (MANDATORY - must match this structure exactly):
+{
+  "evidence": [
+    { "type": "endpoint", "content": "GET /api/videos - Retrieve paginated list of available videos" },
+    { "type": "payload", "content": "Query parameters: page (number), limit (number, max 100)" },
+    { "type": "payload", "content": "Response: { videos: Video[], totalCount: number, hasMore: boolean }" }
+  ]
+}
+
+If no evidence found in text, return:
+{
+  "evidence": []
+}
+
+IMPORTANT: Do not wrap the entire document in a single evidence item. Extract multiple atomic items.
+
+Text to analyze:
 {chunk}
 `.trim();
 
