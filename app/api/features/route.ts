@@ -5,13 +5,15 @@
  */
 
 import { NextResponse } from 'next/server';
-import { eq, desc, and, gte } from 'drizzle-orm';
+import { eq, desc, and, gte, isNull } from 'drizzle-orm';
 import { db } from '@/lib/db/client';
 import { features } from '@/lib/db/schema';
 
 interface FeatureListParams {
   status?: 'candidate' | 'confirmed' | 'rejected';
   minConfidence?: number;
+  type?: 'epic' | 'story' | 'task';
+  parent?: string | 'null';
 }
 
 interface FeatureItem {
@@ -42,6 +44,8 @@ export async function GET(request: Request): Promise<NextResponse<FeatureItem[] 
     const params: FeatureListParams = {
       status: (searchParams.get('status') as 'candidate' | 'confirmed' | 'rejected') || undefined,
       minConfidence: searchParams.get('minConfidence') ? parseFloat(searchParams.get('minConfidence')!) : undefined,
+      type: (searchParams.get('type') as 'epic' | 'story' | 'task') || undefined,
+      parent: searchParams.get('parent') || undefined,
     };
 
     // Build where conditions
@@ -53,6 +57,18 @@ export async function GET(request: Request): Promise<NextResponse<FeatureItem[] 
 
     if (params.minConfidence !== undefined) {
       conditions.push(gte(features.confidenceScore, params.minConfidence.toString()));
+    }
+
+    // Filter by feature type
+    if (params.type && ['epic', 'story', 'task'].includes(params.type)) {
+      conditions.push(eq(features.featureType, params.type));
+    }
+
+    // Filter by parent
+    if (params.parent === 'null') {
+      conditions.push(isNull(features.parentId));
+    } else if (params.parent) {
+      conditions.push(eq(features.parentId, params.parent));
     }
 
     const whereClause = conditions.length > 0 ? and(...conditions) : undefined;

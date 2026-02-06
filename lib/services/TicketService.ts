@@ -7,7 +7,7 @@
 import { db } from '@/lib/db/client';
 import { features, featureOutputs, featureEvidence, evidence } from '@/lib/db/schema';
 import { eq } from 'drizzle-orm';
-import type { JiraEpic, JiraStory } from '@/lib/types/ticket';
+import type { JiraEpic, JiraStory, JiraSubtask } from '@/lib/types/ticket';
 import type { ApiContract, RequirementsDoc, AcceptanceCriteria } from '@/lib/types/output';
 import type { EvidenceType } from '@/lib/types/evidence';
 import type { Platform } from '@/lib/types/platform';
@@ -54,17 +54,42 @@ export class TicketService {
     }
 
     try {
-      // Fetch feature
-      const feature = await this.getFeature(featureId);
+      // Fetch feature WITH hierarchy fields
+      const feature = await this.getFeatureWithType(featureId);
+
+      // CRITICAL: Only epic-type features can be exported as epics
+      if (feature.featureType !== 'epic') {
+        throw new InvalidDataError(
+          `Feature "${feature.name}" is type "${feature.featureType}", not "epic". Only epic-type features can be exported as Jira epics. Did you mean to export the parent feature?`,
+          'featureType'
+        );
+      }
+
+      // Get child features (stories under this epic)
+      const childFeatures = await this.getChildFeatures(featureId);
 
       // Fetch outputs (API contracts, requirements, acceptance criteria)
       const outputs = await this.getOutputs(featureId);
 
-      // Fetch evidence for story generation
-      const evidenceList = await this.getEvidence(featureId);
+      // Generate stories based on hierarchy
+      let stories: JiraStory[];
 
-      // Generate stories from evidence (platform-aware)
-      const stories = await this.generateStories(evidenceList, feature.name, platform);
+      if (childFeatures.length > 0) {
+        // NEW PATH: Generate stories from child features
+        logger.info(
+          { featureId, childCount: childFeatures.length },
+          'Generating stories from child features'
+        );
+        stories = await this.generateStoriesFromChildren(childFeatures, platform);
+      } else {
+        // BACKWARD COMPATIBILITY: No children → use evidence types
+        logger.info(
+          { featureId },
+          'No child features found, generating stories from evidence types (legacy mode)'
+        );
+        const evidenceList = await this.getEvidence(featureId);
+        stories = await this.generateStories(evidenceList, feature.name, platform);
+      }
 
       // Determine priority based on confidence score
       const priority = this.determinePriority(feature.confidenceScore);
@@ -86,7 +111,12 @@ export class TicketService {
       };
 
       logger.info(
-        { featureId, platform, storiesCount: stories.length },
+        {
+          featureId,
+          platform,
+          storiesCount: stories.length,
+          mode: childFeatures.length > 0 ? 'hierarchical' : 'legacy',
+        },
         'Epic generated successfully'
       );
 
@@ -101,18 +131,26 @@ export class TicketService {
   }
 
   /**
-   * Get feature from database
+   * Get feature WITH hierarchy fields
    * @param featureId Feature UUID
-   * @returns Feature record
+   * @returns Feature record with hierarchy fields
    */
-  private async getFeature(
+  private async getFeatureWithType(
     featureId: string
-  ): Promise<{ name: string; description: string | null; confidenceScore: string | null }> {
+  ): Promise<{
+    name: string;
+    description: string | null;
+    confidenceScore: string | null;
+    featureType: string;
+    parentId: string | null;
+  }> {
     const [feature] = await db
       .select({
         name: features.name,
         description: features.description,
         confidenceScore: features.confidenceScore,
+        featureType: features.featureType,
+        parentId: features.parentId,
       })
       .from(features)
       .where(eq(features.id, featureId));
@@ -122,6 +160,38 @@ export class TicketService {
     }
 
     return feature;
+  }
+
+  /**
+   * Get child features (stories under an epic)
+   * @param parentId Parent feature ID
+   * @returns Array of child features
+   */
+  private async getChildFeatures(
+    parentId: string
+  ): Promise<
+    Array<{
+      id: string;
+      name: string;
+      description: string | null;
+      confidenceScore: string | null;
+      featureType: string;
+    }>
+  > {
+    const children = await db
+      .select({
+        id: features.id,
+        name: features.name,
+        description: features.description,
+        confidenceScore: features.confidenceScore,
+        featureType: features.featureType,
+      })
+      .from(features)
+      .where(eq(features.parentId, parentId));
+
+    logger.debug({ parentId, childCount: children.length }, 'Fetched child features');
+
+    return children;
   }
 
   /**
@@ -339,6 +409,163 @@ export class TicketService {
     logger.debug({ storiesCount: stories.length }, 'Stories generated');
 
     return stories;
+  }
+
+  /**
+   * Generate Jira stories from child features (hierarchical mode)
+   * Each child feature becomes a story with evidence-based subtasks
+   * @param childFeatures Child features (stories)
+   * @param platform Optional target platform
+   * @returns Generated stories with subtasks
+   */
+  private async generateStoriesFromChildren(
+    childFeatures: Array<{
+      id: string;
+      name: string;
+      description: string | null;
+      confidenceScore: string | null;
+    }>,
+    platform?: Platform
+  ): Promise<JiraStory[]> {
+    const stories: JiraStory[] = [];
+
+    for (const child of childFeatures) {
+      // Get evidence for this child feature
+      const childEvidence = await this.getEvidence(child.id);
+
+      // Group evidence by type
+      const grouped = this.groupEvidenceByType(childEvidence);
+
+      // Build story description from evidence
+      const description = this.buildStoryDescriptionFromEvidence(child, grouped, platform);
+
+      // Build acceptance criteria from evidence
+      const acceptanceCriteria = this.buildAcceptanceCriteriaFromEvidence(grouped);
+
+      // Estimate story points
+      const storyPoints = this.estimateStoryPoints(childEvidence);
+
+      // Generate subtasks from evidence (evidence becomes subtasks, not stories)
+      let subtasks: JiraSubtask[] = [];
+      if (platform) {
+        try {
+          // Create story object for subtask generation
+          const storyForSubtasks: JiraStory = {
+            title: child.name,
+            description,
+            acceptanceCriteria,
+            storyPoints,
+            labels: [],
+            priority: 'Medium',
+            evidenceIds: childEvidence.map((e) => e.id),
+          };
+
+          subtasks = await this.subtaskGenerator.generateSubtasks(storyForSubtasks, platform);
+        } catch (error) {
+          logger.warn(
+            {
+              childFeature: child.name,
+              error: error instanceof Error ? error.message : String(error),
+            },
+            'Failed to generate subtasks, continuing without them'
+          );
+        }
+      }
+
+      // Create story
+      stories.push({
+        title: child.name, // Use child feature name directly (e.g., "User Login")
+        description,
+        acceptanceCriteria,
+        subtasks,
+        storyPoints,
+        labels: platform ? [platform, 'feature-story'] : ['feature-story'],
+        priority: this.determinePriority(child.confidenceScore),
+        evidenceIds: childEvidence.map((e) => e.id),
+      });
+    }
+
+    return stories;
+  }
+
+  /**
+   * Build story description from evidence items
+   * @param child Child feature
+   * @param grouped Grouped evidence
+   * @param platform Optional target platform
+   * @returns Story description
+   */
+  private buildStoryDescriptionFromEvidence(
+    child: { name: string; description: string | null },
+    grouped: Record<EvidenceType, EvidenceItem[]>,
+    platform?: Platform
+  ): string {
+    const parts: string[] = [];
+
+    // Story introduction
+    parts.push(child.description || `Implement ${child.name} functionality.`);
+    parts.push('');
+
+    // Platform-specific note
+    if (platform) {
+      parts.push(`**Platform**: ${PLATFORM_NAMES[platform]}`);
+      parts.push(`**Tech Stack**: ${PLATFORM_TECH_STACKS[platform].join(', ')}`);
+      parts.push('');
+    }
+
+    // Evidence sections
+    if (grouped.endpoint.length > 0) {
+      parts.push('## API Endpoints');
+      grouped.endpoint.forEach((e) => parts.push(`- ${e.content}`));
+      parts.push('');
+    }
+
+    if (grouped.ui_element.length > 0) {
+      parts.push('## UI Elements');
+      grouped.ui_element.forEach((e) => parts.push(`- ${e.content}`));
+      parts.push('');
+    }
+
+    if (grouped.requirement.length > 0) {
+      parts.push('## Requirements');
+      grouped.requirement.forEach((e) => parts.push(`- ${e.content}`));
+      parts.push('');
+    }
+
+    return parts.join('\n');
+  }
+
+  /**
+   * Build acceptance criteria from all evidence types
+   * @param grouped Grouped evidence
+   * @returns Array of acceptance criteria strings
+   */
+  private buildAcceptanceCriteriaFromEvidence(
+    grouped: Record<EvidenceType, EvidenceItem[]>
+  ): string[] {
+    const criteria: string[] = [];
+
+    // From explicit acceptance criteria
+    grouped.acceptance_criteria.forEach((e) => {
+      criteria.push(e.content);
+    });
+
+    // From endpoints
+    grouped.endpoint.forEach((e) => {
+      criteria.push(`API endpoint implemented: ${e.content}`);
+    });
+
+    // From UI elements
+    grouped.ui_element.forEach((e) => {
+      criteria.push(`UI element present: ${e.content}`);
+    });
+
+    // From edge cases
+    grouped.edge_case.forEach((e) => {
+      criteria.push(`Edge case handled: ${e.content}`);
+    });
+
+    return criteria;
   }
 
   /**
