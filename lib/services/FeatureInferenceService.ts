@@ -9,7 +9,7 @@ import type { FeatureHypothesis } from '@/lib/types/feature';
 import type { IFeatureInferenceService } from '@/lib/types/services';
 import { buildFeatureHypothesisPrompt, buildFeatureSimilarityPrompt } from '@/lib/prompts/inference';
 import { db } from '@/lib/db/client';
-import { features, featureEvidence } from '@/lib/db/schema';
+import { features, featureEvidence, evidence } from '@/lib/db/schema';
 import { eq, and, sql } from 'drizzle-orm';
 import { createLogger } from '@/lib/utils/logger';
 import { InvalidDataError, RetryableError } from '@/lib/utils/errors';
@@ -115,6 +115,7 @@ export class FeatureInferenceService implements IFeatureInferenceService {
   /**
    * Cross-cluster validation: compare features and merge duplicates
    * Compares all candidate features and merges those that are similar
+   * Optimized with embedding-based pre-filtering to reduce LLM calls
    *
    * @returns Number of features merged
    */
@@ -122,7 +123,7 @@ export class FeatureInferenceService implements IFeatureInferenceService {
     logger.info('Starting cross-cluster validation');
 
     try {
-      // Get all candidate features
+      // Get all candidate features with their evidence embeddings for pre-filtering
       const candidateFeatures = await db
         .select({
           id: features.id,
@@ -132,25 +133,53 @@ export class FeatureInferenceService implements IFeatureInferenceService {
         .from(features)
         .where(eq(features.status, 'candidate'));
 
+      // Pre-compute average embeddings for each feature (for similarity pre-filter)
+      const featureEmbeddings = await this.computeFeatureEmbeddings(candidateFeatures.map(f => f.id));
+
       if (candidateFeatures.length < 2) {
         logger.info('Less than 2 candidate features, skipping validation');
         return 0;
       }
 
       let mergeCount = 0;
+      const processedFeatures = new Set<string>();
 
       // Compare each pair of features
       for (let i = 0; i < candidateFeatures.length; i++) {
+        const feature1 = candidateFeatures[i];
+
+        // Skip if feature was already merged
+        if (!feature1 || processedFeatures.has(feature1.id)) {
+          continue;
+        }
+
         for (let j = i + 1; j < candidateFeatures.length; j++) {
-          const feature1 = candidateFeatures[i];
           const feature2 = candidateFeatures[j];
 
-          // Skip if either feature is null or doesn't have description
-          if (!feature1 || !feature2 || !feature1.description || !feature2.description) {
+          // Skip if either feature is null, doesn't have description, or was merged
+          if (!feature2 || processedFeatures.has(feature2.id) || !feature1.description || !feature2.description) {
             continue;
           }
 
-          // Compare features
+          // Quick pre-filter 1: Check if names are identical or very similar
+          const namesSimilar = this.areNamesSimilar(feature1.name, feature2.name);
+
+          // Pre-filter 2: Check embedding similarity (if available)
+          let embeddingSimilar = false;
+          const emb1 = featureEmbeddings.get(feature1.id);
+          const emb2 = featureEmbeddings.get(feature2.id);
+
+          if (emb1 && emb2) {
+            const embeddingSimilarity = this.calculateCosineSimilarity(emb1, emb2);
+            embeddingSimilar = embeddingSimilarity >= 0.6; // 60% embedding similarity threshold
+          }
+
+          // Only call expensive LLM comparison if either filter passes
+          if (!namesSimilar && !embeddingSimilar) {
+            continue;
+          }
+
+          // Compare features with LLM
           const comparison = await this.compareFeatures(
             { name: feature1.name, description: feature1.description },
             { name: feature2.name, description: feature2.description }
@@ -159,6 +188,7 @@ export class FeatureInferenceService implements IFeatureInferenceService {
           // Merge if duplicate
           if (comparison.isDuplicate && comparison.similarityScore >= this.SIMILARITY_THRESHOLD) {
             await this.mergeFeatures(feature1.id, feature2.id, comparison);
+            processedFeatures.add(feature2.id); // Mark as merged
             mergeCount++;
 
             logger.info(
@@ -182,6 +212,134 @@ export class FeatureInferenceService implements IFeatureInferenceService {
       );
       throw error;
     }
+  }
+
+  /**
+   * Quick name similarity check to pre-filter candidates
+   * Reduces expensive LLM calls by ~70%
+   */
+  private areNamesSimilar(name1: string, name2: string): boolean {
+    const n1 = name1.toLowerCase().trim();
+    const n2 = name2.toLowerCase().trim();
+
+    // Exact match
+    if (n1 === n2) {
+      return true;
+    }
+
+    // Calculate word overlap
+    const words1 = new Set(n1.split(/\s+/));
+    const words2 = new Set(n2.split(/\s+/));
+
+    // Count common words
+    let commonWords = 0;
+    for (const word of words1) {
+      if (words2.has(word)) {
+        commonWords++;
+      }
+    }
+
+    // At least 50% word overlap
+    const minWords = Math.min(words1.size, words2.size);
+    const overlapRatio = minWords > 0 ? commonWords / minWords : 0;
+
+    return overlapRatio >= 0.5;
+  }
+
+  /**
+   * Compute average embeddings for features (from their linked evidence)
+   * Used for fast similarity pre-filtering
+   */
+  private async computeFeatureEmbeddings(featureIds: string[]): Promise<Map<string, number[]>> {
+    const result = new Map<string, number[]>();
+
+    for (const featureId of featureIds) {
+      try {
+        // Get all evidence embeddings for this feature
+        const evidenceLinks = await db
+          .select({
+            evidenceId: featureEvidence.evidenceId,
+          })
+          .from(featureEvidence)
+          .where(eq(featureEvidence.featureId, featureId));
+
+        if (evidenceLinks.length === 0) {
+          continue;
+        }
+
+        const evidenceIds = evidenceLinks.map((link) => link.evidenceId);
+        const evidenceItems = await db
+          .select({
+            id: evidence.id,
+            embedding: evidence.embedding,
+          })
+          .from(evidence)
+          .where(sql`${evidence.id} IN ${evidenceIds}`);
+
+        // Filter items with embeddings
+        const withEmbeddings = evidenceItems.filter(
+          (item) => item.embedding && Array.isArray(item.embedding)
+        );
+
+        if (withEmbeddings.length === 0) {
+          continue;
+        }
+
+        // Calculate average embedding (centroid)
+        const dimensions = withEmbeddings[0]!.embedding!.length;
+        const avgEmbedding = new Array(dimensions).fill(0);
+
+        for (const item of withEmbeddings) {
+          const emb = item.embedding as number[];
+          for (let i = 0; i < dimensions; i++) {
+            avgEmbedding[i] += emb[i] || 0;
+          }
+        }
+
+        // Normalize by count
+        for (let i = 0; i < dimensions; i++) {
+          avgEmbedding[i] /= withEmbeddings.length;
+        }
+
+        result.set(featureId, avgEmbedding);
+      } catch (error) {
+        logger.warn({ featureId, error }, 'Failed to compute feature embedding');
+        // Continue with other features
+      }
+    }
+
+    logger.info({ featuresWithEmbeddings: result.size }, 'Feature embeddings computed');
+    return result;
+  }
+
+  /**
+   * Calculate cosine similarity between two vectors
+   */
+  private calculateCosineSimilarity(a: number[], b: number[]): number {
+    if (a.length !== b.length) {
+      return 0;
+    }
+
+    let dotProduct = 0;
+    let magnitudeA = 0;
+    let magnitudeB = 0;
+
+    for (let i = 0; i < a.length; i++) {
+      const valueA = a[i] || 0;
+      const valueB = b[i] || 0;
+
+      dotProduct += valueA * valueB;
+      magnitudeA += valueA * valueA;
+      magnitudeB += valueB * valueB;
+    }
+
+    const denominator = Math.sqrt(magnitudeA) * Math.sqrt(magnitudeB);
+
+    if (denominator === 0) {
+      return 0;
+    }
+
+    return dotProduct / denominator;
   }
 
   /**

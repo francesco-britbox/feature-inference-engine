@@ -26,6 +26,7 @@ export interface EvidenceCluster {
   clusterId: number;
   evidenceIds: string[];
   size: number;
+  evidenceItems?: Array<{ id: string; content: string; type: string }>; // Include evidence data for efficiency
 }
 
 export class ClusteringService {
@@ -81,13 +82,25 @@ export class ClusteringService {
         }
       });
 
-      // Convert to cluster objects
+      // Convert to cluster objects with evidence data (avoid re-query)
       const clusters: EvidenceCluster[] = Array.from(clusterMap.entries()).map(
-        ([clusterId, evidenceIds]) => ({
-          clusterId,
-          evidenceIds,
-          size: evidenceIds.length,
-        })
+        ([clusterId, evidenceIds]) => {
+          // Get evidence items for this cluster
+          const clusterItems = itemsWithEmbeddings
+            .filter(item => evidenceIds.includes(item.id))
+            .map(item => ({
+              id: item.id,
+              content: item.content,
+              type: item.type,
+            }));
+
+          return {
+            clusterId,
+            evidenceIds,
+            size: evidenceIds.length,
+            evidenceItems: clusterItems,
+          };
+        }
       );
 
       // Handle single-item "clusters" (edge case)

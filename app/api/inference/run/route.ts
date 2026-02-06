@@ -34,10 +34,8 @@ export async function POST(): Promise<NextResponse> {
     // Step 3: Generate features from clusters
     let featuresGenerated = 0;
     for (const cluster of clusters) {
-      const clusterEvidence = await db.select().from(evidence);
-      const items = clusterEvidence
-        .filter((e) => cluster.evidenceIds.includes(e.id))
-        .map((e) => ({ id: e.id, content: e.content, type: e.type }));
+      // Use evidence items from cluster (already fetched, no re-query needed)
+      const items = cluster.evidenceItems || [];
 
       if (items.length > 0) {
         await featureInferenceService.generateFeatureFromCluster(items);
