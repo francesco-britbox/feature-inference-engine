@@ -12,6 +12,7 @@ import { clusteringService } from '@/lib/services/ClusteringService';
 import { featureInferenceService } from '@/lib/services/FeatureInferenceService';
 import { confidenceScorer } from '@/lib/services/ConfidenceScorer';
 import { relationshipBuilder } from '@/lib/services/RelationshipBuilder';
+import { featureHierarchyService } from '@/lib/services/FeatureHierarchyService';
 
 /**
  * POST /api/inference/run
@@ -46,6 +47,9 @@ export async function POST(): Promise<NextResponse> {
     // Step 4: Validate and merge duplicates
     const mergedCount = await featureInferenceService.validateAndMergeDuplicates();
 
+    // Step 4.5: Detect hierarchy (NEW)
+    const hierarchyResult = await featureHierarchyService.buildHierarchyForAllFeatures();
+
     // Step 5: Calculate confidence scores
     const scoredResults = await confidenceScorer.calculateConfidenceForAllFeatures();
 
@@ -57,9 +61,10 @@ export async function POST(): Promise<NextResponse> {
       clustersFound: clusters.length,
       featuresGenerated,
       featuresMerged: mergedCount,
+      hierarchyDetected: hierarchyResult, // NEW
       confidenceScored: scoredResults.length,
       relationshipsBuilt,
-      message: 'Feature inference complete!',
+      message: 'Feature inference complete with hierarchy!',
     });
   } catch (error) {
     return NextResponse.json(
