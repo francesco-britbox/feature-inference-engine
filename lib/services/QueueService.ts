@@ -4,7 +4,7 @@
  * Single Responsibility: Job queue management
  */
 
-import { eq } from 'drizzle-orm';
+import { eq, sql } from 'drizzle-orm';
 import { db } from '@/lib/db/client';
 import { processingJobs, documents } from '@/lib/db/schema';
 import { QueueError } from '@/lib/utils/errors';
@@ -62,7 +62,10 @@ export class QueueService {
   }
 
   /**
-   * Process next pending job
+   * Process next pending job using atomic claim.
+   * Uses FOR UPDATE SKIP LOCKED to prevent race conditions
+   * when multiple workers try to claim the same job.
+   *
    * @param processor Function to process the job
    * @returns Job ID if processed, null if no jobs available
    */
@@ -74,40 +77,42 @@ export class QueueService {
       return null;
     }
 
-    // Fetch oldest pending job
-    const [job] = await db
-      .select()
-      .from(processingJobs)
-      .where(eq(processingJobs.status, 'pending'))
-      .orderBy(processingJobs.createdAt)
-      .limit(1);
+    // Atomically claim the oldest pending job using FOR UPDATE SKIP LOCKED.
+    // This ensures no two concurrent calls can claim the same job.
+    const claimedRows = await db.execute(sql`
+      UPDATE processing_jobs
+      SET status = 'processing', started_at = NOW()
+      WHERE id = (
+        SELECT id FROM processing_jobs
+        WHERE status = 'pending'
+        ORDER BY created_at ASC
+        LIMIT 1
+        FOR UPDATE SKIP LOCKED
+      )
+      RETURNING id, document_id
+    `);
 
-    if (!job) {
+    const claimed = claimedRows.rows as Array<{ id: string; document_id: string }>;
+    if (claimed.length === 0) {
       return null; // No pending jobs
     }
 
-    // Mark as processing
-    this.processing.add(job.id);
+    const jobId = claimed[0]!.id;
+    const documentId = claimed[0]!.document_id;
+
+    // Track in-memory for concurrency limit
+    this.processing.add(jobId);
 
     try {
-      // Update job status to processing
-      await db
-        .update(processingJobs)
-        .set({
-          status: 'processing',
-          startedAt: new Date(),
-        })
-        .where(eq(processingJobs.id, job.id));
-
       // Update document status
       await db
         .update(documents)
         .set({ status: 'processing' })
-        .where(eq(documents.id, job.documentId));
+        .where(eq(documents.id, documentId));
 
       // Execute processor with timeout
       await this.executeWithTimeout(
-        () => processor(job.documentId, job.id),
+        () => processor(documentId, jobId),
         this.options.timeout
       );
 
@@ -118,7 +123,7 @@ export class QueueService {
           status: 'completed',
           completedAt: new Date(),
         })
-        .where(eq(processingJobs.id, job.id));
+        .where(eq(processingJobs.id, jobId));
 
       // Update document status
       await db
@@ -127,27 +132,27 @@ export class QueueService {
           status: 'completed',
           processedAt: new Date(),
         })
-        .where(eq(documents.id, job.documentId));
+        .where(eq(documents.id, documentId));
 
-      return job.id;
+      return jobId;
     } catch (error) {
       const errorMsg = error instanceof Error ? error.message : String(error);
 
       // Log timeout or error
       if (errorMsg.includes('timeout')) {
-        const [jobData] = await db.select().from(processingJobs).where(eq(processingJobs.id, job.id));
+        const [jobData] = await db.select().from(processingJobs).where(eq(processingJobs.id, jobId));
         const retryNum = (jobData?.retryCount || 0) + 1;
         activityLogService.addLog(
           'warning',
           `⏱️ Timeout after ${this.options.timeout / 1000}s (attempt ${retryNum} of ${this.options.maxRetries})`,
-          { documentId: job.documentId, jobId: job.id }
+          { documentId, jobId }
         );
       }
 
-      await this.handleJobFailure(job.id, job.documentId, error as Error);
-      return job.id;
+      await this.handleJobFailure(jobId, documentId, error as Error);
+      return jobId;
     } finally {
-      this.processing.delete(job.id);
+      this.processing.delete(jobId);
     }
   }
 

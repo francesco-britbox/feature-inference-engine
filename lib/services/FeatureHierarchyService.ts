@@ -10,6 +10,7 @@ import { db } from '@/lib/db/client';
 import { features } from '@/lib/db/schema';
 import { eq, sql } from 'drizzle-orm';
 import { createLogger } from '@/lib/utils/logger';
+import { findBestMatch } from '@/lib/utils/textSimilarity';
 import { chatRateLimiter } from '@/lib/ai/openai';
 import { openaiClient } from '@/lib/ai/OpenAIClient';
 import { InvalidDataError } from '@/lib/utils/errors';
@@ -61,6 +62,7 @@ export class FeatureHierarchyService {
     epics: number;
     stories: number;
     tasks: number;
+    synthesizedEpics: number;
   }> {
     logger.info('Starting hierarchy detection for all features');
 
@@ -78,7 +80,7 @@ export class FeatureHierarchyService {
 
       if (unclassifiedFeatures.length === 0) {
         logger.info('No unclassified features found');
-        return { classified: 0, relationships: 0, epics: 0, stories: 0, tasks: 0 };
+        return { classified: 0, relationships: 0, epics: 0, stories: 0, tasks: 0, synthesizedEpics: 0 };
       }
 
       logger.info({ count: unclassifiedFeatures.length }, 'Processing features');
@@ -86,22 +88,23 @@ export class FeatureHierarchyService {
       // Step 2: Classify each feature (epic vs story vs task)
       const classifications = await this.classifyAllFeatures(unclassifiedFeatures);
 
-      // Step 3: Detect parent-child relationships
-      const relationships = await this.detectParentChildRelationships(classifications);
+      // Step 2.5: Synthesize missing epics and assign stories to parents
+      const synthesisResult = await this.synthesizeMissingEpics(classifications);
 
-      // Step 4: Update database
-      await this.applyHierarchy(classifications, relationships);
+      // Step 3: Update database
+      await this.applyHierarchy(synthesisResult.enrichedClassifications, synthesisResult.relationships);
 
-      // Step 5: Validate no circular references
+      // Step 4: Validate no circular references
       await this.validateNoCircularReferences();
 
       // Count by type
       const counts = {
-        classified: classifications.length,
-        relationships: relationships.length,
-        epics: classifications.filter((c) => c.featureType === 'epic').length,
-        stories: classifications.filter((c) => c.featureType === 'story').length,
-        tasks: classifications.filter((c) => c.featureType === 'task').length,
+        classified: synthesisResult.enrichedClassifications.length,
+        relationships: synthesisResult.relationships.length,
+        epics: synthesisResult.enrichedClassifications.filter((c) => c.featureType === 'epic').length,
+        stories: synthesisResult.enrichedClassifications.filter((c) => c.featureType === 'story').length,
+        tasks: synthesisResult.enrichedClassifications.filter((c) => c.featureType === 'task').length,
+        synthesizedEpics: synthesisResult.synthesizedEpics,
       };
 
       logger.info(counts, 'Hierarchy detection completed successfully');
@@ -306,7 +309,238 @@ EXAMPLES:
   }
 
   /**
-   * Step 3: Detect parent-child relationships between features
+   * Pending epic to be inserted inside the applyHierarchy transaction
+   */
+  private pendingEpicInserts: Array<{
+    name: string;
+    description: string;
+    tempKey: string; // LLM-proposed name used as lookup key
+  }> = [];
+
+  /**
+   * Synthesize missing epics for orphan stories.
+   * Uses a single LLM call to assign stories to existing epics and propose new ones.
+   * Falls back to detectParentChildRelationships if synthesis fails.
+   *
+   * IMPORTANT: Does NOT insert synthetic epics into DB directly.
+   * Instead, stores them in pendingEpicInserts for the transaction in applyHierarchy.
+   */
+  private async synthesizeMissingEpics(
+    classifications: ClassificationResult[]
+  ): Promise<{
+    enrichedClassifications: ClassificationResult[];
+    relationships: Array<{ childId: string; parentId: string; confidence: number }>;
+    synthesizedEpics: number;
+    pendingEpics: Array<{ name: string; description: string; tempKey: string }>;
+  }> {
+    this.pendingEpicInserts = [];
+
+    const epics = classifications.filter((c) => c.featureType === 'epic');
+    const stories = classifications.filter((c) => c.featureType === 'story');
+
+    if (stories.length === 0) {
+      logger.info('No stories found, skipping epic synthesis');
+      return { enrichedClassifications: classifications, relationships: [], synthesizedEpics: 0, pendingEpics: [] };
+    }
+
+    logger.info(
+      { epics: epics.length, stories: stories.length },
+      'Starting epic synthesis for orphan stories'
+    );
+
+    try {
+      const prompt = this.buildEpicSynthesisPrompt(epics, stories);
+
+      const response = await chatRateLimiter.schedule(() =>
+        this.llmClient.chat({
+          model: this.MODEL,
+          messages: [{ role: 'user', content: prompt }],
+          temperature: this.TEMPERATURE,
+          responseFormat: { type: 'json_object' },
+        })
+      );
+
+      if (!response.content) {
+        logger.warn('LLM returned empty response for epic synthesis, falling back');
+        const fallbackRels = await this.detectParentChildRelationships(classifications);
+        return { enrichedClassifications: classifications, relationships: fallbackRels, synthesizedEpics: 0, pendingEpics: [] };
+      }
+
+      const parsed = JSON.parse(response.content) as {
+        assignments: Array<{ story: string; parent_epic: string }>;
+        new_epics: Array<{ name: string; description: string }>;
+      };
+
+      // Build name→id maps for existing features
+      const epicNameToId = new Map<string, string>();
+      for (const epic of epics) {
+        epicNameToId.set(epic.featureName, epic.featureId);
+      }
+      const storyNameToId = new Map<string, string>();
+      for (const story of stories) {
+        storyNameToId.set(story.featureName, story.featureId);
+      }
+
+      // Track enriched classifications (start with all existing)
+      const enrichedClassifications = [...classifications];
+      let synthesizedCount = 0;
+
+      // Collect new epics proposed by LLM — DO NOT insert yet, defer to transaction
+      // Use a temporary placeholder key (the proposed name) for relationship resolution
+      const proposedEpicNames = new Set<string>();
+      const pendingEpics: Array<{ name: string; description: string; tempKey: string }> = [];
+
+      for (const proposedEpic of parsed.new_epics ?? []) {
+        const existingId = this.findSimilarEpic(proposedEpic.name, epicNameToId);
+
+        if (existingId) {
+          logger.info(
+            { proposed: proposedEpic.name, existingId },
+            'Proposed epic matches existing epic, reusing'
+          );
+          // Already exists, no insert needed. Map the proposed name to existing ID.
+          epicNameToId.set(proposedEpic.name, existingId);
+        } else {
+          pendingEpics.push({
+            name: proposedEpic.name,
+            description: proposedEpic.description,
+            tempKey: proposedEpic.name,
+          });
+          proposedEpicNames.add(proposedEpic.name);
+          synthesizedCount++;
+
+          logger.info(
+            { epicName: proposedEpic.name },
+            'Queued synthetic epic for transactional insert'
+          );
+        }
+      }
+
+      // Build relationships from assignments.
+      // For proposed epics that don't have IDs yet, use a placeholder marker
+      // (the proposed name prefixed with __PENDING__) that applyHierarchy will resolve.
+      const relationships: Array<{ childId: string; parentId: string; confidence: number }> = [];
+      for (const assignment of parsed.assignments ?? []) {
+        const childId = this.resolveFeatureId(assignment.story, storyNameToId);
+
+        let parentId: string | null = null;
+        // Try to resolve to existing epic first
+        parentId = this.resolveFeatureId(assignment.parent_epic, epicNameToId);
+        // If not found and it's a proposed epic, use temp key
+        if (!parentId && proposedEpicNames.has(assignment.parent_epic)) {
+          parentId = `__PENDING__${assignment.parent_epic}`;
+        }
+
+        if (childId && parentId) {
+          relationships.push({ childId, parentId, confidence: 0.8 });
+        } else {
+          logger.warn(
+            { story: assignment.story, epic: assignment.parent_epic },
+            'Could not resolve assignment IDs'
+          );
+        }
+      }
+
+      this.pendingEpicInserts = pendingEpics;
+
+      logger.info(
+        { synthesizedEpics: synthesizedCount, assignedRelationships: relationships.length },
+        'Epic synthesis completed (inserts deferred to transaction)'
+      );
+
+      return { enrichedClassifications, relationships, synthesizedEpics: synthesizedCount, pendingEpics };
+    } catch (error) {
+      logger.error({ error }, 'Epic synthesis failed, falling back to pairwise detection');
+      const fallbackRels = await this.detectParentChildRelationships(classifications);
+      return { enrichedClassifications: classifications, relationships: fallbackRels, synthesizedEpics: 0, pendingEpics: [] };
+    }
+  }
+
+  /**
+   * Build LLM prompt for epic synthesis: assign stories to epics and propose new ones.
+   */
+  private buildEpicSynthesisPrompt(
+    epics: ClassificationResult[],
+    stories: ClassificationResult[]
+  ): string {
+    const epicList =
+      epics.length > 0
+        ? epics.map((e) => `- "${e.featureName}"`).join('\n')
+        : '(none)';
+
+    const storyList = stories.map((s) => `- "${s.featureName}"`).join('\n');
+
+    return `
+You are organizing OTT platform features into a hierarchy. Every story MUST have a parent epic.
+
+EXISTING EPICS:
+${epicList}
+
+STORIES TO ASSIGN:
+${storyList}
+
+INSTRUCTIONS:
+1. Assign each story to the most appropriate existing epic.
+2. If a story does NOT fit any existing epic, propose a NEW broad epic for it.
+3. New epics should be broad functional domains (e.g., "User Authentication", "Content Discovery", "Navigation & Layout").
+4. Group multiple related orphan stories under the same new epic when possible.
+5. Every story MUST appear in exactly one assignment.
+
+OUTPUT (JSON):
+{
+  "assignments": [
+    { "story": "exact story name", "parent_epic": "exact epic name (existing or new)" }
+  ],
+  "new_epics": [
+    { "name": "New Epic Name", "description": "Brief description of this functional domain" }
+  ]
+}
+
+RULES:
+- "story" must exactly match one of the story names listed above
+- "parent_epic" must exactly match an existing epic name OR a name from "new_epics"
+- Every story in the list above MUST appear in "assignments"
+- Only propose new epics when no existing epic is a reasonable fit
+- Prefer fewer, broader new epics over many narrow ones
+`.trim();
+  }
+
+  /**
+   * Check if a proposed epic name is similar to an existing epic.
+   * Uses meaningful word overlap (stopword-filtered, Jaccard similarity).
+   * Returns the existing epic's ID if similar, or null.
+   */
+  private findSimilarEpic(
+    proposedName: string,
+    epicNameToId: Map<string, string>
+  ): string | null {
+    return findBestMatch(proposedName, epicNameToId, 0.5);
+  }
+
+  /**
+   * Resolve a feature name to its ID, using fuzzy matching as fallback.
+   */
+  private resolveFeatureId(
+    name: string,
+    nameToId: Map<string, string>
+  ): string | null {
+    // Exact match
+    const exact = nameToId.get(name);
+    if (exact) return exact;
+
+    // Case-insensitive match
+    const lower = name.toLowerCase().trim();
+    for (const [key, id] of nameToId) {
+      if (key.toLowerCase().trim() === lower) {
+        return id;
+      }
+    }
+
+    return null;
+  }
+
+  /**
+   * Step 3 (fallback): Detect parent-child relationships between features
    */
   private async detectParentChildRelationships(
     classifications: ClassificationResult[]
@@ -499,6 +733,7 @@ IMPORTANT:
 
   /**
    * Step 4: Apply hierarchy to database (transaction)
+   * Inserts synthetic epics AND updates all features atomically.
    */
   private async applyHierarchy(
     classifications: ClassificationResult[],
@@ -507,49 +742,118 @@ IMPORTANT:
     logger.info('Applying hierarchy to database');
 
     await db.transaction(async (tx) => {
-      // Update feature types
-      for (const classification of classifications) {
-        const hierarchyLevel =
-          classification.featureType === 'epic' ? 0 : classification.featureType === 'story' ? 1 : 2;
-
-        await tx
-          .update(features)
-          .set({
-            featureType: classification.featureType,
-            hierarchyLevel,
+      // Insert pending synthetic epics inside the transaction
+      const pendingKeyToId = new Map<string, string>();
+      for (const pending of this.pendingEpicInserts) {
+        const insertResult = await tx
+          .insert(features)
+          .values({
+            name: pending.name,
+            description: pending.description,
+            featureType: 'epic',
+            hierarchyLevel: 0,
+            status: 'candidate',
+            metadata: { synthetic: true, synthesized_at: new Date().toISOString() },
           })
-          .where(eq(features.id, classification.featureId));
+          .returning({ id: features.id });
 
-        logger.debug(
-          { featureId: classification.featureId, type: classification.featureType },
-          'Feature type updated'
-        );
+        const inserted = insertResult[0];
+        if (inserted) {
+          pendingKeyToId.set(`__PENDING__${pending.tempKey}`, inserted.id);
+          logger.info(
+            { epicName: pending.name, epicId: inserted.id },
+            'Synthetic epic inserted in transaction'
+          );
+        }
+      }
+      // Clear pending list after insert
+      this.pendingEpicInserts = [];
+
+      // Build a map of childId -> parentId for quick lookup,
+      // resolving __PENDING__ markers to actual IDs
+      const childToParentMap = new Map<string, { parentId: string; confidence: number }>();
+      for (const relationship of relationships) {
+        let parentId = relationship.parentId;
+        // Resolve pending epic markers
+        if (parentId.startsWith('__PENDING__')) {
+          const resolvedId = pendingKeyToId.get(parentId);
+          if (resolvedId) {
+            parentId = resolvedId;
+          } else {
+            logger.warn(
+              { marker: parentId },
+              'Could not resolve pending epic marker, skipping relationship'
+            );
+            continue;
+          }
+        }
+        childToParentMap.set(relationship.childId, {
+          parentId,
+          confidence: relationship.confidence,
+        });
       }
 
-      // Update parent_id for children
-      for (const relationship of relationships) {
-        await tx
-          .update(features)
-          .set({
-            parentId: relationship.parentId,
-            metadata: sql`
-              COALESCE(${features.metadata}, '{}'::jsonb) ||
-              jsonb_build_object(
-                'parent_detected_confidence', ${relationship.confidence},
-                'parent_detected_at', ${new Date().toISOString()}
-              )
-            `,
-          })
-          .where(eq(features.id, relationship.childId));
+      // Update features: if they have a parent relationship, update type + parent together
+      // Otherwise adjust type to epic if orphan story
+      for (const classification of classifications) {
+        // CRITICAL FIX: If classified as story/task but NO parent found, promote to epic
+        // This handles "orphan stories" that violate the check_epic_no_parent constraint
+        let effectiveType = classification.featureType;
+        const parentInfo = childToParentMap.get(classification.featureId);
 
-        logger.debug(
-          {
-            childId: relationship.childId,
-            parentId: relationship.parentId,
-            confidence: relationship.confidence,
-          },
-          'Parent relationship created'
-        );
+        if ((effectiveType === 'story' || effectiveType === 'task') && !parentInfo) {
+          // Orphan story/task: promote to epic to satisfy constraint
+          effectiveType = 'epic';
+          logger.info(
+            { featureId: classification.featureId, originalType: classification.featureType },
+            'Promoted orphan story to epic (no parent found)'
+          );
+        }
+        const hierarchyLevel =
+          effectiveType === 'epic' ? 0 : effectiveType === 'story' ? 1 : 2;
+
+        if (parentInfo) {
+          // Has parent: update type, level, AND parent_id together (avoids constraint violation)
+          const timestamp = new Date().toISOString();
+          await tx
+            .update(features)
+            .set({
+              featureType: effectiveType,
+              hierarchyLevel,
+              parentId: parentInfo.parentId,
+              metadata: sql`
+                COALESCE(${features.metadata}, '{}'::jsonb) ||
+                jsonb_build_object(
+                  'parent_detected_confidence', ${sql.raw(String(parentInfo.confidence))},
+                  'parent_detected_at', ${sql.raw(`'${timestamp}'`)}
+                )
+              `,
+            })
+            .where(eq(features.id, classification.featureId));
+
+          logger.debug(
+            {
+              featureId: classification.featureId,
+              type: effectiveType,
+              parentId: parentInfo.parentId,
+            },
+            'Feature type and parent updated'
+          );
+        } else {
+          // No parent: update type (already promoted to epic if needed) and level
+          await tx
+            .update(features)
+            .set({
+              featureType: effectiveType,
+              hierarchyLevel,
+            })
+            .where(eq(features.id, classification.featureId));
+
+          logger.debug(
+            { featureId: classification.featureId, type: effectiveType },
+            'Feature type updated'
+          );
+        }
       }
     });
 

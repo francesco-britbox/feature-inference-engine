@@ -78,3 +78,32 @@ export const EVIDENCE_TYPES = [
   'bug',
   'constraint',
 ] as const;
+
+/**
+ * Graph Visualization Colors (hex for D3 SVG attributes)
+ */
+
+/** Feature type node fill colors */
+export const GRAPH_FEATURE_TYPE_COLORS: Record<string, string> = {
+  epic: '#3b82f6',    // blue-500
+  story: '#22c55e',   // green-500
+  task: '#f59e0b',    // amber-500
+};
+
+/** Relationship type link stroke colors */
+export const GRAPH_RELATIONSHIP_COLORS: Record<string, string> = {
+  implements: '#22c55e', // green-500
+  supports: '#3b82f6',  // blue-500
+  constrains: '#ef4444', // red-500
+  extends: '#a855f7',   // purple-500
+};
+
+/** General graph color defaults */
+export const GRAPH_COLORS = {
+  hierarchyLink: '#94a3b8',   // slate-400
+  evidenceNode: '#9ca3af',    // gray-400
+  nodeStroke: '#ffffff',       // white border on nodes
+  labelColor: '#1e293b',      // slate-800
+  tooltipBg: '#0f172a',       // slate-900
+  tooltipText: '#f8fafc',     // slate-50
+} as const;

@@ -6,10 +6,10 @@
 
 import type { LLMClient } from '@/lib/types/llm';
 import type { RelationshipType } from '@/lib/types/feature';
-import { buildRelationshipPrompt } from '@/lib/prompts/inference';
+import { buildRelationshipPrompt, buildBatchRelationshipPrompt } from '@/lib/prompts/inference';
 import { db } from '@/lib/db/client';
 import { features, featureEvidence, evidence } from '@/lib/db/schema';
-import { eq, and } from 'drizzle-orm';
+import { eq, and, inArray } from 'drizzle-orm';
 import { createLogger } from '@/lib/utils/logger';
 import { InvalidDataError, RetryableError } from '@/lib/utils/errors';
 import { chatRateLimiter } from '@/lib/ai/openai';
@@ -120,8 +120,8 @@ export class RelationshipBuilder {
   }
 
   /**
-   * Process all relationships for a feature
-   * Batch processing for efficiency
+   * Process all relationships for a feature using a single batched LLM call.
+   * Sends all evidence items in one prompt instead of 1 call per pair.
    *
    * @param featureId - Feature ID to process
    * @returns Array of relationship processing results
@@ -133,14 +133,22 @@ export class RelationshipBuilder {
       throw new InvalidDataError('Feature ID is required');
     }
 
-    logger.info({ featureId }, 'Building relationships for feature');
+    logger.info({ featureId }, 'Building relationships for feature (batched)');
 
     try {
+      // Get feature name
+      const [feature] = await db
+        .select({ id: features.id, name: features.name })
+        .from(features)
+        .where(eq(features.id, featureId));
+
+      if (!feature) {
+        throw new InvalidDataError(`Feature not found: ${featureId}`);
+      }
+
       // Get all evidence linked to this feature
       const evidenceLinks = await db
-        .select({
-          evidenceId: featureEvidence.evidenceId,
-        })
+        .select({ evidenceId: featureEvidence.evidenceId })
         .from(featureEvidence)
         .where(eq(featureEvidence.featureId, featureId));
 
@@ -149,20 +157,59 @@ export class RelationshipBuilder {
         return [];
       }
 
-      logger.info({ featureId, evidenceCount: evidenceLinks.length }, 'Processing evidence links');
+      // Fetch full evidence data in one query
+      const evidenceIds = evidenceLinks.map((link) => link.evidenceId);
+      const evidenceItems = await db
+        .select({ id: evidence.id, content: evidence.content, type: evidence.type })
+        .from(evidence)
+        .where(inArray(evidence.id, evidenceIds));
 
-      // Process each evidence link
-      const results: RelationshipProcessingResult[] = [];
-      for (const link of evidenceLinks) {
-        const result = await this.determineRelationship(featureId, link.evidenceId);
-        results.push(result);
+      if (evidenceItems.length === 0) {
+        logger.warn({ featureId }, 'No evidence data found');
+        return [];
+      }
+
+      logger.info(
+        { featureId, evidenceCount: evidenceItems.length },
+        'Classifying relationships in single LLM call'
+      );
+
+      // Single batched LLM call
+      const prompt = buildBatchRelationshipPrompt(feature.name, evidenceItems);
+      const response = await chatRateLimiter.schedule(() =>
+        this.llmClient.chat({
+          model: this.MODEL,
+          messages: [{ role: 'user', content: prompt }],
+          temperature: this.TEMPERATURE,
+          responseFormat: { type: 'json_object' },
+        })
+      );
+
+      if (!response.content) {
+        throw new RetryableError('LLM returned empty response for batch relationship analysis');
+      }
+
+      // Parse batch response
+      const results = this.parseBatchRelationshipResult(
+        response.content,
+        featureId,
+        evidenceItems
+      );
+
+      // Update all relationships in database
+      for (const result of results) {
+        await this.updateRelationship(result.featureId, result.evidenceId, {
+          relationshipType: result.relationshipType,
+          strength: result.strength,
+          reasoning: result.reasoning,
+        });
       }
 
       // Log summary
       const typeDistribution = this.getTypeDistribution(results);
       logger.info(
         { featureId, total: results.length, distribution: typeDistribution },
-        'Relationships built successfully'
+        'Relationships built successfully (batched)'
       );
 
       return results;
@@ -319,6 +366,79 @@ export class RelationshipBuilder {
     } catch (error) {
       logger.error({ content, error }, 'Failed to parse relationship result');
       throw new InvalidDataError('Invalid JSON response from LLM for relationship analysis');
+    }
+  }
+
+  /**
+   * Parse batch LLM response into array of RelationshipProcessingResult.
+   * Falls back to default values for evidence items not covered by the LLM response.
+   */
+  private parseBatchRelationshipResult(
+    content: string,
+    featureId: string,
+    evidenceItems: Array<{ id: string; content: string; type: string }>
+  ): RelationshipProcessingResult[] {
+    const validTypes: RelationshipType[] = ['implements', 'supports', 'constrains', 'extends'];
+
+    try {
+      const parsed = JSON.parse(content) as {
+        relationships: Array<{
+          evidence_id: string;
+          relationship_type: string;
+          strength: number;
+          reasoning: string;
+        }>;
+      };
+
+      const responseMap = new Map<string, {
+        relationship_type: string;
+        strength: number;
+        reasoning: string;
+      }>();
+
+      for (const rel of parsed.relationships ?? []) {
+        if (rel.evidence_id) {
+          responseMap.set(rel.evidence_id, rel);
+        }
+      }
+
+      // Map results back to all evidence items, with fallbacks for missing entries
+      return evidenceItems.map((item) => {
+        const llmResult = responseMap.get(item.id);
+
+        if (llmResult && validTypes.includes(llmResult.relationship_type as RelationshipType)) {
+          return {
+            featureId,
+            evidenceId: item.id,
+            relationshipType: llmResult.relationship_type as RelationshipType,
+            strength: Math.max(0, Math.min(1, llmResult.strength)),
+            reasoning: llmResult.reasoning || '',
+          };
+        }
+
+        // Fallback: assign 'supports' with moderate strength if LLM missed this item
+        logger.warn(
+          { featureId, evidenceId: item.id },
+          'LLM did not return result for evidence item, using fallback'
+        );
+        return {
+          featureId,
+          evidenceId: item.id,
+          relationshipType: 'supports' as RelationshipType,
+          strength: 0.5,
+          reasoning: 'Relationship inferred by default (LLM did not classify this item)',
+        };
+      });
+    } catch (error) {
+      logger.error({ content, error }, 'Failed to parse batch relationship result');
+      // If parsing completely fails, return defaults for all items
+      return evidenceItems.map((item) => ({
+        featureId,
+        evidenceId: item.id,
+        relationshipType: 'supports' as RelationshipType,
+        strength: 0.5,
+        reasoning: 'Relationship inferred by default (batch parse failure)',
+      }));
     }
   }
 

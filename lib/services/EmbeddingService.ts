@@ -10,6 +10,9 @@ import { logger } from '@/lib/utils/logger';
 import type { LLMClient } from '@/lib/types/llm';
 import type { IEmbeddingStorage } from './EmbeddingStorageService';
 import { embeddingStorageService } from './EmbeddingStorageService';
+import { db } from '@/lib/db/client';
+import { evidence } from '@/lib/db/schema';
+import { sql, eq, isNotNull } from 'drizzle-orm';
 
 /**
  * Batch size for embedding API (100 items per request).
@@ -135,35 +138,103 @@ export class EmbeddingService {
   }
 
   /**
-   * Find similar evidence using vector search
-   * DISABLED: Chroma removed due to webpack issues
-   * TODO: Implement using PostgreSQL pgvector <-> operator for cosine similarity
+   * Find similar evidence using vector search via pgvector.
+   * Generates an embedding for the query text, then finds the nearest neighbors
+   * using cosine distance (<=>) in PostgreSQL.
+   *
    * @param query Query text to search for
    * @param k Number of results (default 20)
-   * @returns Array of evidence IDs with similarity scores
+   * @returns Array of evidence IDs with similarity scores (1 = identical, 0 = unrelated)
    */
   async findSimilar(
-    _query: string,
-    _k: number = DEFAULT_K_NEIGHBORS
+    query: string,
+    k: number = DEFAULT_K_NEIGHBORS
   ): Promise<Array<{ id: string; similarity: number }>> {
-    this.log.warn('findSimilar() disabled - Chroma removed, needs pgvector implementation');
-    return [];
+    try {
+      // Generate embedding for the query
+      const queryEmbedding = await this.generateEmbedding(query);
+
+      if (queryEmbedding.length === 0) {
+        this.log.warn('Failed to generate query embedding');
+        return [];
+      }
+
+      // pgvector cosine distance: <=> returns distance (0 = identical, 2 = opposite)
+      // Convert to similarity: 1 - distance
+      const vectorLiteral = `[${queryEmbedding.join(',')}]`;
+      const results = await db
+        .select({
+          id: evidence.id,
+          distance: sql<number>`embedding <=> ${vectorLiteral}::vector`.as('distance'),
+        })
+        .from(evidence)
+        .where(isNotNull(evidence.embedding))
+        .orderBy(sql`embedding <=> ${vectorLiteral}::vector`)
+        .limit(k);
+
+      return results.map((r) => ({
+        id: r.id,
+        similarity: parseFloat((1 - r.distance).toFixed(4)),
+      }));
+    } catch (error) {
+      this.log.error(
+        { error: error instanceof Error ? error.message : String(error) },
+        'findSimilar failed'
+      );
+      return [];
+    }
   }
 
   /**
-   * Find similar evidence by evidence ID
-   * DISABLED: Chroma removed due to webpack issues
-   * TODO: Implement using PostgreSQL pgvector <-> operator for cosine similarity
+   * Find similar evidence by evidence ID using pgvector.
+   * Looks up the source evidence's embedding, then finds nearest neighbors
+   * (excluding the source itself).
+   *
    * @param evidenceId Evidence UUID
    * @param k Number of results (default 20)
    * @returns Array of similar evidence IDs with similarity scores
    */
   async findSimilarByEvidenceId(
-    _evidenceId: string,
-    _k: number = DEFAULT_K_NEIGHBORS
+    evidenceId: string,
+    k: number = DEFAULT_K_NEIGHBORS
   ): Promise<Array<{ id: string; similarity: number }>> {
-    this.log.warn('findSimilarByEvidenceId() disabled - Chroma removed, needs pgvector implementation');
-    return [];
+    try {
+      // Get the source evidence's embedding
+      const [source] = await db
+        .select({ embedding: evidence.embedding })
+        .from(evidence)
+        .where(eq(evidence.id, evidenceId));
+
+      if (!source?.embedding) {
+        this.log.warn({ evidenceId }, 'Source evidence has no embedding');
+        return [];
+      }
+
+      // Use pgvector cosine distance to find nearest neighbors
+      const vectorLiteral = `[${source.embedding.join(',')}]`;
+      const results = await db
+        .select({
+          id: evidence.id,
+          distance: sql<number>`embedding <=> ${vectorLiteral}::vector`.as('distance'),
+        })
+        .from(evidence)
+        .where(
+          sql`${evidence.id} != ${evidenceId} AND ${evidence.embedding} IS NOT NULL`
+        )
+        .orderBy(sql`embedding <=> ${vectorLiteral}::vector`)
+        .limit(k);
+
+      return results.map((r) => ({
+        id: r.id,
+        similarity: parseFloat((1 - r.distance).toFixed(4)),
+      }));
+    } catch (error) {
+      this.log.error(
+        { evidenceId, error: error instanceof Error ? error.message : String(error) },
+        'findSimilarByEvidenceId failed'
+      );
+      return [];
+    }
   }
 
   /**

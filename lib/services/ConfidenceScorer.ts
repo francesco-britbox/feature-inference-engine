@@ -6,7 +6,7 @@
 
 import { db } from '@/lib/db/client';
 import { features, featureEvidence, evidence } from '@/lib/db/schema';
-import { eq, inArray } from 'drizzle-orm';
+import { eq, inArray, isNull } from 'drizzle-orm';
 import { SIGNAL_WEIGHTS } from '@/lib/types/feature';
 import type { IConfidenceScorer } from '@/lib/types/services';
 import { createLogger } from '@/lib/utils/logger';
@@ -119,26 +119,28 @@ export class ConfidenceScorer implements IConfidenceScorer {
   }
 
   /**
-   * Calculate confidence scores for all candidate features
-   * Batch processing for efficiency
+   * Calculate confidence scores for all features that haven't been manually reviewed.
+   * Scores candidates AND confirmed features (from hierarchy step) to ensure
+   * all features have up-to-date confidence after pipeline changes.
+   * Skips features with a reviewedAt timestamp (human-reviewed).
    *
    * @returns Array of confidence calculation results
    */
   async calculateConfidenceForAllFeatures(): Promise<ConfidenceResult[]> {
-    logger.info('Calculating confidence scores for all candidate features');
+    logger.info('Calculating confidence scores for all unreviewed features');
 
     try {
-      // Get all candidate features
-      const candidateFeatures = await db
+      // Get all features that haven't been manually reviewed
+      const unreviewedFeatures = await db
         .select({ id: features.id })
         .from(features)
-        .where(eq(features.status, 'candidate'));
+        .where(isNull(features.reviewedAt));
 
-      logger.info({ count: candidateFeatures.length }, 'Processing features');
+      logger.info({ count: unreviewedFeatures.length }, 'Processing features');
 
       // Calculate confidence for each feature
       const results: ConfidenceResult[] = [];
-      for (const feature of candidateFeatures) {
+      for (const feature of unreviewedFeatures) {
         const result = await this.calculateConfidenceForFeature(feature.id);
         results.push(result);
       }
@@ -164,27 +166,52 @@ export class ConfidenceScorer implements IConfidenceScorer {
   }
 
   /**
-   * Compute confidence score using the formula: confidence = 1 - Π(1-weight)
-   * Each evidence type contributes based on its signal weight
+   * Maximum evidence items per type that contribute to the score.
+   * Beyond this count, additional items of the same type add no signal.
+   * Prevents 10 "ui_element" items from inflating confidence to ~1.0.
+   */
+  private readonly MAX_ITEMS_PER_TYPE = 3;
+
+  /**
+   * Compute confidence score using the formula: confidence = 1 - Π(1 - effective_weight)
+   *
+   * To prevent same-type inflation, each evidence type contributes at most
+   * MAX_ITEMS_PER_TYPE signals, with diminishing weight per additional item:
+   *   1st item: full weight
+   *   2nd item: weight * 0.5
+   *   3rd item: weight * 0.25
+   *
+   * This means diversity of evidence types is rewarded over quantity of a single type.
+   * A feature with 1 endpoint + 1 UI element + 1 requirement scores higher than
+   * one with 3 UI elements.
    */
   private computeConfidence(
     featureId: string,
     evidenceItems: EvidenceWithType[]
   ): ConfidenceResult {
-    // Count evidence by type for reporting
+    // Group evidence by type
+    const typeGroups = new Map<string, number>();
+    for (const item of evidenceItems) {
+      typeGroups.set(item.type, (typeGroups.get(item.type) || 0) + 1);
+    }
+
+    // Track signal weights for reporting
     const signalWeights: Record<string, number> = {};
 
-    // Calculate product of (1 - weight) for all evidence
+    // Calculate product of (1 - effective_weight) with diminishing returns per type
     let product = 1.0;
 
-    for (const item of evidenceItems) {
-      const weight = SIGNAL_WEIGHTS[item.type] || 0.1; // Default weight if type unknown
+    for (const [type, count] of typeGroups) {
+      const baseWeight = SIGNAL_WEIGHTS[type] || 0.1;
+      signalWeights[type] = baseWeight;
 
-      // Track signal weights
-      signalWeights[item.type] = weight;
-
-      // Apply formula: product *= (1 - weight)
-      product *= 1 - weight;
+      const effectiveCount = Math.min(count, this.MAX_ITEMS_PER_TYPE);
+      for (let i = 0; i < effectiveCount; i++) {
+        // Diminishing factor: 1.0, 0.5, 0.25, ...
+        const diminishingFactor = 1 / Math.pow(2, i);
+        const effectiveWeight = baseWeight * diminishingFactor;
+        product *= 1 - effectiveWeight;
+      }
     }
 
     // Final confidence: 1 - product
@@ -289,10 +316,16 @@ export class ConfidenceScorer implements IConfidenceScorer {
     // Calculate result
     const result = this.computeConfidence(featureId, evidenceItems);
 
-    // Build breakdown
+    // Build breakdown with diminishing returns matching computeConfidence
     const evidenceBreakdown = Array.from(typeGroups.entries()).map(([type, count]) => {
       const weight = SIGNAL_WEIGHTS[type] || 0.1;
-      const contribution = 1 - Math.pow(1 - weight, count);
+      const effectiveCount = Math.min(count, this.MAX_ITEMS_PER_TYPE);
+      let typeProduct = 1.0;
+      for (let i = 0; i < effectiveCount; i++) {
+        const diminishingFactor = 1 / Math.pow(2, i);
+        typeProduct *= 1 - weight * diminishingFactor;
+      }
+      const contribution = 1 - typeProduct;
 
       return {
         type,

@@ -114,3 +114,58 @@ Strength:
 - 0.3 = Supporting/peripheral
 `.trim();
 }
+
+/**
+ * Prompt for batch-classifying relationships between a feature and ALL its evidence
+ * Version: 2.0 — replaces per-pair calls with a single batched call
+ * Model: gpt-4o
+ * Temperature: 0.2
+ */
+export function buildBatchRelationshipPrompt(
+  featureName: string,
+  evidenceItems: Array<{ id: string; content: string; type: string }>
+): string {
+  const evidenceList = evidenceItems
+    .map((e, i) => `  ${i + 1}. [ID: ${e.id}] (type: ${e.type}) ${e.content}`)
+    .join('\n');
+
+  return `
+Classify the relationship between a feature and each piece of evidence listed below.
+
+Feature: "${featureName}"
+
+Evidence items:
+${evidenceList}
+
+For EACH evidence item, determine:
+1. relationship_type: "implements" | "supports" | "constrains" | "extends"
+2. strength: 0.0-1.0
+3. reasoning: brief explanation
+
+Relationship Types:
+- "implements": Evidence directly implements this feature (e.g., login button implements User Login)
+- "supports": Evidence supports or enables this feature (e.g., session API supports User Login)
+- "constrains": Evidence constrains how feature works (e.g., "password must be 8+ chars" constrains User Login)
+- "extends": Evidence extends/enhances feature (e.g., "remember me" extends User Login)
+
+Strength:
+- 1.0 = Core/essential to feature
+- 0.7 = Important to feature
+- 0.5 = Moderate relevance
+- 0.3 = Supporting/peripheral
+
+Return JSON with an array of results, one per evidence item, in the same order:
+{
+  "relationships": [
+    {
+      "evidence_id": "the ID from above",
+      "relationship_type": "implements",
+      "strength": 0.8,
+      "reasoning": "..."
+    }
+  ]
+}
+
+IMPORTANT: You must return exactly ${evidenceItems.length} items in the "relationships" array, one for each evidence item above.
+`.trim();
+}

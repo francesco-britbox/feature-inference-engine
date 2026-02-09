@@ -10,9 +10,11 @@ import type { IFeatureInferenceService } from '@/lib/types/services';
 import { buildFeatureHypothesisPrompt, buildFeatureSimilarityPrompt } from '@/lib/prompts/inference';
 import { db } from '@/lib/db/client';
 import { features, featureEvidence, evidence } from '@/lib/db/schema';
-import { eq, and, sql } from 'drizzle-orm';
+import { eq, and, sql, inArray } from 'drizzle-orm';
 import { createLogger } from '@/lib/utils/logger';
 import { InvalidDataError, RetryableError } from '@/lib/utils/errors';
+import { areNamesSimilar } from '@/lib/utils/textSimilarity';
+import { cosineSimilarity } from '@/lib/utils/vectorMath';
 import { chatRateLimiter } from '@/lib/ai/openai';
 import { openaiClient } from '@/lib/ai/OpenAIClient';
 
@@ -162,7 +164,7 @@ export class FeatureInferenceService implements IFeatureInferenceService {
           }
 
           // Quick pre-filter 1: Check if names are identical or very similar
-          const namesSimilar = this.areNamesSimilar(feature1.name, feature2.name);
+          const namesSimilar = areNamesSimilar(feature1.name, feature2.name);
 
           // Pre-filter 2: Check embedding similarity (if available)
           let embeddingSimilar = false;
@@ -170,7 +172,7 @@ export class FeatureInferenceService implements IFeatureInferenceService {
           const emb2 = featureEmbeddings.get(feature2.id);
 
           if (emb1 && emb2) {
-            const embeddingSimilarity = this.calculateCosineSimilarity(emb1, emb2);
+            const embeddingSimilarity = cosineSimilarity(emb1, emb2);
             embeddingSimilar = embeddingSimilarity >= 0.6; // 60% embedding similarity threshold
           }
 
@@ -215,38 +217,6 @@ export class FeatureInferenceService implements IFeatureInferenceService {
   }
 
   /**
-   * Quick name similarity check to pre-filter candidates
-   * Reduces expensive LLM calls by ~70%
-   */
-  private areNamesSimilar(name1: string, name2: string): boolean {
-    const n1 = name1.toLowerCase().trim();
-    const n2 = name2.toLowerCase().trim();
-
-    // Exact match
-    if (n1 === n2) {
-      return true;
-    }
-
-    // Calculate word overlap
-    const words1 = new Set(n1.split(/\s+/));
-    const words2 = new Set(n2.split(/\s+/));
-
-    // Count common words
-    let commonWords = 0;
-    for (const word of words1) {
-      if (words2.has(word)) {
-        commonWords++;
-      }
-    }
-
-    // At least 50% word overlap
-    const minWords = Math.min(words1.size, words2.size);
-    const overlapRatio = minWords > 0 ? commonWords / minWords : 0;
-
-    return overlapRatio >= 0.5;
-  }
-
-  /**
    * Compute average embeddings for features (from their linked evidence)
    * Used for fast similarity pre-filtering
    */
@@ -274,7 +244,7 @@ export class FeatureInferenceService implements IFeatureInferenceService {
             embedding: evidence.embedding,
           })
           .from(evidence)
-          .where(sql`${evidence.id} IN ${evidenceIds}`);
+          .where(inArray(evidence.id, evidenceIds));
 
         // Filter items with embeddings
         const withEmbeddings = evidenceItems.filter(
@@ -310,36 +280,6 @@ export class FeatureInferenceService implements IFeatureInferenceService {
 
     logger.info({ featuresWithEmbeddings: result.size }, 'Feature embeddings computed');
     return result;
-  }
-
-  /**
-   * Calculate cosine similarity between two vectors
-   */
-  private calculateCosineSimilarity(a: number[], b: number[]): number {
-    if (a.length !== b.length) {
-      return 0;
-    }
-
-    let dotProduct = 0;
-    let magnitudeA = 0;
-    let magnitudeB = 0;
-
-    for (let i = 0; i < a.length; i++) {
-      const valueA = a[i] || 0;
-      const valueB = b[i] || 0;
-
-      dotProduct += valueA * valueB;
-      magnitudeA += valueA * valueA;
-      magnitudeB += valueB * valueB;
-    }
-
-    const denominator = Math.sqrt(magnitudeA) * Math.sqrt(magnitudeB);
-
-    if (denominator === 0) {
-      return 0;
-    }
-
-    return dotProduct / denominator;
   }
 
   /**
@@ -524,7 +464,7 @@ export class FeatureInferenceService implements IFeatureInferenceService {
       await tx
         .update(features)
         .set({
-          metadata: sql`${features.metadata}::jsonb || jsonb_build_object('merged_from', ${removeFeatureId}, 'merge_reasoning', ${comparison.reasoning})`,
+          metadata: sql`COALESCE(${features.metadata}, '{}'::jsonb) || jsonb_build_object('merged_from', ${sql.raw(`'${removeFeatureId}'`)}, 'merge_reasoning', ${sql.raw(`'${comparison.reasoning.replace(/'/g, "''")}'`)})`,
         })
         .where(eq(features.id, keepFeatureId));
     });

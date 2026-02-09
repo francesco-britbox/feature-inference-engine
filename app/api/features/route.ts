@@ -24,6 +24,8 @@ interface FeatureItem {
   status: string;
   inferredAt: string;
   reviewedAt: string | null;
+  featureType: string;
+  parentId: string | null;
 }
 
 interface CreateFeatureRequest {
@@ -88,6 +90,8 @@ export async function GET(request: Request): Promise<NextResponse<FeatureItem[] 
       status: record.status,
       inferredAt: record.inferredAt.toISOString(),
       reviewedAt: record.reviewedAt?.toISOString() || null,
+      featureType: record.featureType,
+      parentId: record.parentId,
     }));
 
     return NextResponse.json(items, { status: 200 });
@@ -140,6 +144,8 @@ export async function POST(request: Request): Promise<NextResponse<FeatureItem |
       status: newFeature.status,
       inferredAt: newFeature.inferredAt.toISOString(),
       reviewedAt: newFeature.reviewedAt?.toISOString() || null,
+      featureType: newFeature.featureType,
+      parentId: newFeature.parentId,
     };
 
     return NextResponse.json(response, { status: 201 });
