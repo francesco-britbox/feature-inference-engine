@@ -1,7 +1,8 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { Play, RotateCcw, Plus } from 'lucide-react';
+import Link from 'next/link';
+import { Play, RotateCcw, Plus, ArrowLeft } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -159,6 +160,12 @@ export default function CorrelationTestPage() {
   return (
     <div className="container mx-auto py-8 space-y-6">
       <div>
+        <Link href="/">
+          <Button variant="ghost" size="sm" className="mb-4">
+            <ArrowLeft className="h-4 w-4 mr-2" />
+            Back to Home
+          </Button>
+        </Link>
         <h1 className="text-3xl font-bold tracking-tight">Correlation Testing</h1>
         <p className="text-muted-foreground mt-2">
           Manually test feature inference by selecting evidence items

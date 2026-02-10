@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
-import { ChevronRight, ChevronDown, FolderOpen, Folder, FileText, Check, X, Eye, Download, Network } from 'lucide-react';
+import { ChevronRight, ChevronDown, FolderOpen, Folder, FileText, Check, X, Eye, Download, Network, ArrowLeft } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -265,6 +265,12 @@ export default function FeaturesPage() {
     <div className="container mx-auto py-8 space-y-6">
       <div className="flex items-center justify-between">
         <div>
+          <Link href="/">
+            <Button variant="ghost" size="sm" className="mb-4">
+              <ArrowLeft className="h-4 w-4 mr-2" />
+              Back to Home
+            </Button>
+          </Link>
           <h1 className="text-3xl font-bold tracking-tight">Features</h1>
           <p className="text-muted-foreground mt-2">
             Hierarchical view of inferred features (epics contain stories)
