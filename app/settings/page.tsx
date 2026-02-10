@@ -7,11 +7,13 @@
 
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
-import { ArrowLeft, Trash2, AlertTriangle, Database, HardDrive, Loader2 } from 'lucide-react';
+import { ArrowLeft, Trash2, AlertTriangle, Database, HardDrive, Loader2, Settings2, Plus, X, Save } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
+import { Label } from '@/components/ui/label';
+import { Checkbox } from '@/components/ui/checkbox';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 
 interface ApiStats {
@@ -21,15 +23,61 @@ interface ApiStats {
   queue: { pending: number; processing: number; failed: number };
 }
 
+interface PlatformCheckbox {
+  platform: string;
+  enabled: boolean;
+}
+
+interface RegionEntry {
+  name: string;
+  enabled: boolean;
+}
+
+interface TicketConfigForm {
+  projectKey: string;
+  projectName: string;
+  reporter: string;
+  defaultPriority: string;
+  targetPlatforms: PlatformCheckbox[];
+  targetRegions: RegionEntry[];
+  sprintName: string;
+  toolName: string;
+  authorName: string;
+}
+
+const DEFAULT_CONFIG: TicketConfigForm = {
+  projectKey: 'PROJ',
+  projectName: 'My Project',
+  reporter: 'System',
+  defaultPriority: 'Medium',
+  targetPlatforms: [
+    { platform: 'Web', enabled: true },
+    { platform: 'iOS', enabled: false },
+    { platform: 'Android', enabled: false },
+  ],
+  targetRegions: [
+    { name: 'US', enabled: true },
+    { name: 'EU', enabled: true },
+  ],
+  sprintName: '',
+  toolName: 'AI Feature Inference Engine',
+  authorName: 'System',
+};
+
 export default function SettingsPage(): JSX.Element {
   const [stats, setStats] = useState<ApiStats | null>(null);
   const [confirmText, setConfirmText] = useState('');
   const [deleting, setDeleting] = useState(false);
   const [storageSize, setStorageSize] = useState('Calculating...');
+  const [ticketConfig, setTicketConfig] = useState<TicketConfigForm>(DEFAULT_CONFIG);
+  const [savingConfig, setSavingConfig] = useState(false);
+  const [configSaved, setConfigSaved] = useState(false);
+  const [newRegion, setNewRegion] = useState('');
 
   useEffect(() => {
     fetchStats();
     calculateStorageSize();
+    fetchTicketConfig();
   }, []);
 
   const fetchStats = async (): Promise<void> => {
@@ -58,6 +106,84 @@ export default function SettingsPage(): JSX.Element {
     } catch {
       setStorageSize('Unknown');
     }
+  };
+
+  const fetchTicketConfig = async (): Promise<void> => {
+    try {
+      const response = await fetch('/api/settings/ticket-config');
+      if (!response.ok) return;
+      const data = await response.json();
+      setTicketConfig({
+        projectKey: data.projectKey || DEFAULT_CONFIG.projectKey,
+        projectName: data.projectName || DEFAULT_CONFIG.projectName,
+        reporter: data.reporter || DEFAULT_CONFIG.reporter,
+        defaultPriority: data.defaultPriority || DEFAULT_CONFIG.defaultPriority,
+        targetPlatforms: data.targetPlatforms || DEFAULT_CONFIG.targetPlatforms,
+        targetRegions: data.targetRegions || DEFAULT_CONFIG.targetRegions,
+        sprintName: data.sprintName || '',
+        toolName: data.toolName || DEFAULT_CONFIG.toolName,
+        authorName: data.authorName || DEFAULT_CONFIG.authorName,
+      });
+    } catch {
+      // Use defaults
+    }
+  };
+
+  const handleSaveConfig = async (): Promise<void> => {
+    setSavingConfig(true);
+    setConfigSaved(false);
+    try {
+      const response = await fetch('/api/settings/ticket-config', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          ...ticketConfig,
+          sprintName: ticketConfig.sprintName || null,
+        }),
+      });
+      if (!response.ok) {
+        const data = await response.json();
+        throw new Error(data.error || 'Save failed');
+      }
+      setConfigSaved(true);
+      setTimeout(() => setConfigSaved(false), 3000);
+    } catch (error) {
+      alert(`Failed to save: ${error instanceof Error ? error.message : String(error)}`);
+    } finally {
+      setSavingConfig(false);
+    }
+  };
+
+  const togglePlatform = (index: number): void => {
+    setTicketConfig((prev) => {
+      const platforms = [...prev.targetPlatforms];
+      platforms[index] = { ...platforms[index]!, enabled: !platforms[index]!.enabled };
+      return { ...prev, targetPlatforms: platforms };
+    });
+  };
+
+  const toggleRegion = (index: number): void => {
+    setTicketConfig((prev) => {
+      const regions = [...prev.targetRegions];
+      regions[index] = { ...regions[index]!, enabled: !regions[index]!.enabled };
+      return { ...prev, targetRegions: regions };
+    });
+  };
+
+  const addRegion = (): void => {
+    if (!newRegion.trim()) return;
+    setTicketConfig((prev) => ({
+      ...prev,
+      targetRegions: [...prev.targetRegions, { name: newRegion.trim(), enabled: true }],
+    }));
+    setNewRegion('');
+  };
+
+  const removeRegion = (index: number): void => {
+    setTicketConfig((prev) => ({
+      ...prev,
+      targetRegions: prev.targetRegions.filter((_, i) => i !== index),
+    }));
   };
 
   const handleDeleteAll = async (): Promise<void> => {
@@ -145,6 +271,167 @@ export default function SettingsPage(): JSX.Element {
               </span>
               <Badge>{storageSize}</Badge>
             </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Ticket Generation Config */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Settings2 className="h-5 w-5" />
+            Ticket Generation
+          </CardTitle>
+          <CardDescription>
+            Configure project defaults for Jira ticket export
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-6">
+          {/* Row 1: Project Key + Project Name */}
+          <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-2">
+              <Label htmlFor="projectKey">Project Key</Label>
+              <Input
+                id="projectKey"
+                value={ticketConfig.projectKey}
+                onChange={(e) => setTicketConfig((p) => ({ ...p, projectKey: e.target.value.toUpperCase() }))}
+                placeholder="W2C"
+                maxLength={10}
+              />
+              <p className="text-xs text-muted-foreground">Used as ticket prefix (e.g., W2C-100)</p>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="projectName">Project Name</Label>
+              <Input
+                id="projectName"
+                value={ticketConfig.projectName}
+                onChange={(e) => setTicketConfig((p) => ({ ...p, projectName: e.target.value }))}
+                placeholder="My Project"
+              />
+            </div>
+          </div>
+
+          {/* Row 2: Reporter + Author */}
+          <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-2">
+              <Label htmlFor="reporter">Reporter</Label>
+              <Input
+                id="reporter"
+                value={ticketConfig.reporter}
+                onChange={(e) => setTicketConfig((p) => ({ ...p, reporter: e.target.value }))}
+                placeholder="Francesco Farruggia"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="authorName">Author Name</Label>
+              <Input
+                id="authorName"
+                value={ticketConfig.authorName}
+                onChange={(e) => setTicketConfig((p) => ({ ...p, authorName: e.target.value }))}
+                placeholder="System"
+              />
+            </div>
+          </div>
+
+          {/* Row 3: Tool Name + Sprint */}
+          <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-2">
+              <Label htmlFor="toolName">Tool Name</Label>
+              <Input
+                id="toolName"
+                value={ticketConfig.toolName}
+                onChange={(e) => setTicketConfig((p) => ({ ...p, toolName: e.target.value }))}
+                placeholder="AI Feature Inference Engine"
+              />
+              <p className="text-xs text-muted-foreground">Appears in the export footer</p>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="sprintName">Sprint Name (optional)</Label>
+              <Input
+                id="sprintName"
+                value={ticketConfig.sprintName}
+                onChange={(e) => setTicketConfig((p) => ({ ...p, sprintName: e.target.value }))}
+                placeholder="Sprint 1"
+              />
+            </div>
+          </div>
+
+          {/* Target Platforms */}
+          <div className="space-y-3">
+            <Label>Target Platforms</Label>
+            <div className="flex gap-6">
+              {ticketConfig.targetPlatforms.map((p, i) => (
+                <div key={p.platform} className="flex items-center gap-2">
+                  <Checkbox
+                    id={`platform-${p.platform}`}
+                    checked={p.enabled}
+                    onCheckedChange={() => togglePlatform(i)}
+                  />
+                  <Label htmlFor={`platform-${p.platform}`} className="font-normal cursor-pointer">
+                    {p.platform}
+                  </Label>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Target Regions */}
+          <div className="space-y-3">
+            <Label>Target Regions</Label>
+            <div className="flex flex-wrap gap-2">
+              {ticketConfig.targetRegions.map((r, i) => (
+                <div key={`${r.name}-${i}`} className="flex items-center gap-1.5 bg-muted rounded-md px-2 py-1">
+                  <Checkbox
+                    id={`region-${r.name}`}
+                    checked={r.enabled}
+                    onCheckedChange={() => toggleRegion(i)}
+                  />
+                  <Label htmlFor={`region-${r.name}`} className="font-normal cursor-pointer text-sm">
+                    {r.name}
+                  </Label>
+                  <button
+                    type="button"
+                    onClick={() => removeRegion(i)}
+                    className="ml-1 text-muted-foreground hover:text-destructive"
+                  >
+                    <X className="h-3 w-3" />
+                  </button>
+                </div>
+              ))}
+            </div>
+            <div className="flex gap-2">
+              <Input
+                value={newRegion}
+                onChange={(e) => setNewRegion(e.target.value)}
+                placeholder="Add region..."
+                className="max-w-[200px]"
+                onKeyDown={(e) => e.key === 'Enter' && addRegion()}
+              />
+              <Button variant="outline" size="sm" onClick={addRegion} disabled={!newRegion.trim()}>
+                <Plus className="h-4 w-4 mr-1" />
+                Add
+              </Button>
+            </div>
+          </div>
+
+          {/* Save Button */}
+          <div className="flex items-center gap-3">
+            <Button onClick={handleSaveConfig} disabled={savingConfig}>
+              {savingConfig ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Saving...
+                </>
+              ) : (
+                <>
+                  <Save className="mr-2 h-4 w-4" />
+                  Save Configuration
+                </>
+              )}
+            </Button>
+            {configSaved && (
+              <span className="text-sm text-green-600 font-medium">Saved</span>
+            )}
           </div>
         </CardContent>
       </Card>

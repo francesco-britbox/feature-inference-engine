@@ -237,7 +237,8 @@ export const featureOutputs = pgTable(
         'story',
         'acceptance_criteria',
         'api_contract',
-        'requirements'
+        'requirements',
+        'user_story_narrative'
       )`
     ),
   })
@@ -296,4 +297,31 @@ export const guidelineCache = pgTable('guideline_cache', {
   content: text('content').notNull(),
   fetchedAt: timestamp('fetched_at', { withTimezone: true }).defaultNow().notNull(),
   expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+});
+
+/**
+ * ticket_config table
+ * Project-level ticket generation configuration (singleton row)
+ */
+export const ticketConfig = pgTable('ticket_config', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  projectKey: text('project_key').notNull().default('PROJ'),
+  projectName: text('project_name').notNull().default('My Project'),
+  reporter: text('reporter').notNull().default('System'),
+  defaultPriority: text('default_priority').notNull().default('Medium'),
+  targetPlatforms: jsonb('target_platforms').$type<Array<{ platform: string; enabled: boolean }>>().default([
+    { platform: 'Web', enabled: true },
+    { platform: 'iOS', enabled: false },
+    { platform: 'Android', enabled: false },
+  ]),
+  targetRegions: jsonb('target_regions').$type<Array<{ name: string; enabled: boolean }>>().default([
+    { name: 'US', enabled: true },
+    { name: 'EU', enabled: true },
+  ]),
+  sprintName: text('sprint_name'),
+  toolName: text('tool_name').notNull().default('AI Feature Inference Engine'),
+  authorName: text('author_name').notNull().default('System'),
+  keyCounter: integer('key_counter').notNull().default(1),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
 });

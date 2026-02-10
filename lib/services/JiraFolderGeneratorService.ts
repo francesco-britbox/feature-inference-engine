@@ -16,8 +16,9 @@ import { db } from '@/lib/db/client';
 import { features, evidence, featureEvidence } from '@/lib/db/schema';
 import { eq, inArray } from 'drizzle-orm';
 import type { Platform } from '@/lib/types/platform';
-import type { JiraEpic, JiraStory, JiraSubtask } from '@/lib/types/ticket';
+import type { JiraEpic, JiraEpicFull, JiraStory, JiraSubtask } from '@/lib/types/ticket';
 import { TicketService } from './TicketService';
+import { MarkdownTemplateFormatter } from './MarkdownTemplateFormatter';
 import { createLogger } from '@/lib/utils/logger';
 
 const logger = createLogger({ service: 'JiraFolderGenerator' });
@@ -44,9 +45,11 @@ export type ProgressCallback = (progress: number, message: string) => void;
 export class JiraFolderGeneratorService {
   private readonly TEMP_BASE_PATH = path.join(process.cwd(), 'temp', 'jira');
   private readonly ticketService: TicketService;
+  private readonly formatter: MarkdownTemplateFormatter;
 
   constructor() {
     this.ticketService = new TicketService();
+    this.formatter = new MarkdownTemplateFormatter();
   }
 
   /**
@@ -127,9 +130,18 @@ export class JiraFolderGeneratorService {
 
     onProgress(0, `Generating epic: ${feature.name}...`);
 
-    // Generate epic with stories and subtasks
+    // Generate full-template epic with stories and subtasks
     const platformForApi = request.platform === 'mobile' ? 'ios' : request.platform;
-    const epic = await this.ticketService.generateEpic(featureId, platformForApi as Platform);
+    let epic: JiraEpic;
+    let epicFull: JiraEpicFull | null = null;
+
+    try {
+      epicFull = await this.ticketService.generateEpicFull(featureId, platformForApi as Platform);
+      epic = epicFull;
+    } catch (error) {
+      logger.warn({ featureId, error }, 'Failed to generate full epic, falling back to base');
+      epic = await this.ticketService.generateEpic(featureId, platformForApi as Platform);
+    }
 
     // Create epic folder (sanitized name)
     const epicFolderName = this.sanitizeFolderName(feature.name);
@@ -138,8 +150,13 @@ export class JiraFolderGeneratorService {
 
     onProgress(10, `Created epic folder: ${epicFolderName}`);
 
-    // Create epic.md
-    await this.createEpicMarkdown(epicPath, epic, request.platform);
+    // Create epic.md using formatter when available
+    if (epicFull) {
+      const epicMd = this.formatter.formatEpicSummary(epicFull, request.platform);
+      await fs.writeFile(path.join(epicPath, 'epic.md'), epicMd);
+    } else {
+      await this.createEpicMarkdown(epicPath, epic, request.platform);
+    }
     onProgress(20, 'Created epic.md');
 
     // Get evidence for this feature
@@ -174,13 +191,17 @@ export class JiraFolderGeneratorService {
       }
 
       try {
+        // Get the full story data if available
+        const storyFull = epicFull?.storiesFull[storyIndex] ?? null;
+
         await this.generateStoryFolder(
           epicPath,
           story,
           storyId,
           storyIndex,
           evidenceItems,
-          request
+          request,
+          storyFull
         );
 
         processedStories++;
@@ -203,15 +224,21 @@ export class JiraFolderGeneratorService {
     storyId: string,
     _storyIndex: number,
     evidenceItems: Array<{ id: string; type: string; content: string; rawData?: unknown; extractedAt: Date }>,
-    request: JiraGenerationRequest
+    request: JiraGenerationRequest,
+    storyFull?: import('@/lib/types/ticket').JiraStoryFull | null
   ): Promise<void> {
     // Create story folder
     const storyFolderName = this.sanitizeFolderName(story.title);
     const storyPath = path.join(epicPath, storyFolderName);
     await fs.mkdir(storyPath, { recursive: true });
 
-    // Create story.md
-    await this.createStoryMarkdown(storyPath, story);
+    // Create story.md using formatter when full data is available
+    if (storyFull) {
+      const storyMd = this.formatter.formatStory(storyFull);
+      await fs.writeFile(path.join(storyPath, 'story.md'), storyMd);
+    } else {
+      await this.createStoryMarkdown(storyPath, story);
+    }
 
     // Create references folder for story
     const storyReferencesPath = path.join(storyPath, 'references');
@@ -242,6 +269,7 @@ export class JiraFolderGeneratorService {
     }
 
     // Process subtasks
+    const parentKey = storyFull?.storyKey || storyId;
     if (story.subtasks) {
       for (let subtaskIndex = 0; subtaskIndex < story.subtasks.length; subtaskIndex++) {
         const subtask = story.subtasks[subtaskIndex]!;
@@ -256,7 +284,8 @@ export class JiraFolderGeneratorService {
           storyPath,
           subtask,
           subtaskIndex,
-          evidenceItems.slice(0, 2) // Sample evidence for subtask
+          evidenceItems.slice(0, 2), // Sample evidence for subtask
+          parentKey
         );
       }
     }
@@ -269,15 +298,21 @@ export class JiraFolderGeneratorService {
     storyPath: string,
     subtask: JiraSubtask,
     _subtaskIndex: number,
-    evidenceItems: Array<{ id: string; type: string; content: string; extractedAt: Date }>
+    evidenceItems: Array<{ id: string; type: string; content: string; extractedAt: Date }>,
+    parentKey?: string
   ): Promise<void> {
     // Create subtask folder
     const subtaskFolderName = this.sanitizeFolderName(subtask.title);
     const subtaskPath = path.join(storyPath, subtaskFolderName);
     await fs.mkdir(subtaskPath, { recursive: true });
 
-    // Create subtask.md
-    await this.createSubtaskMarkdown(subtaskPath, subtask);
+    // Create subtask.md using formatter when parentKey is available
+    if (parentKey) {
+      const subtaskMd = this.formatter.formatSubtask(subtask, parentKey);
+      await fs.writeFile(path.join(subtaskPath, 'subtask.md'), subtaskMd);
+    } else {
+      await this.createSubtaskMarkdown(subtaskPath, subtask);
+    }
 
     // Create references folder for subtask
     const subtaskReferencesPath = path.join(subtaskPath, 'references');

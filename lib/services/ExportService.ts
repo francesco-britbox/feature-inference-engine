@@ -5,8 +5,9 @@
  * Follows DRY - reuses formatting logic across formats
  */
 
-import type { JiraEpic, ExportFormat, CsvRow } from '@/lib/types/ticket';
+import type { JiraEpic, JiraEpicFull, ExportFormat, CsvRow } from '@/lib/types/ticket';
 import type { AcceptanceCriterion } from '@/lib/types/output';
+import { MarkdownTemplateFormatter } from './MarkdownTemplateFormatter';
 import { createLogger } from '@/lib/utils/logger';
 import { InvalidDataError } from '@/lib/utils/errors';
 
@@ -17,13 +18,16 @@ const logger = createLogger({ service: 'ExportService' });
  * Converts epics to JSON, Markdown, or CSV format
  */
 export class ExportService {
+  private formatter = new MarkdownTemplateFormatter();
+
   /**
    * Export epic to specified format
-   * @param epic Jira epic
+   * Uses template formatter for markdown when JiraEpicFull is provided
+   * @param epic Jira epic (base or full)
    * @param format Export format
    * @returns Formatted string
    */
-  exportEpic(epic: JiraEpic, format: ExportFormat): string {
+  exportEpic(epic: JiraEpic | JiraEpicFull, format: ExportFormat): string {
     logger.info({ format, epicTitle: epic.title }, 'Exporting epic');
 
     if (!epic) {
@@ -34,12 +38,23 @@ export class ExportService {
       case 'json':
         return this.exportToJson(epic);
       case 'md':
-        return this.exportToMarkdown(epic);
+        // Use template formatter if epic has full template data
+        if (this.isEpicFull(epic)) {
+          return this.formatter.formatEpicWithStories(epic);
+        }
+        return this.exportToMarkdownLegacy(epic);
       case 'csv':
         return this.exportToCsv(epic);
       default:
         throw new InvalidDataError(`Unsupported format: ${format}`, 'format');
     }
+  }
+
+  /**
+   * Type guard: check if epic is JiraEpicFull
+   */
+  private isEpicFull(epic: JiraEpic | JiraEpicFull): epic is JiraEpicFull {
+    return 'epicKey' in epic && 'storiesFull' in epic;
   }
 
   /**
@@ -91,11 +106,11 @@ export class ExportService {
   }
 
   /**
-   * Export to Markdown (human-readable format)
+   * Legacy markdown export (flat format, used when JiraEpicFull is not available)
    * @param epic Jira epic
    * @returns Markdown string
    */
-  private exportToMarkdown(epic: JiraEpic): string {
+  private exportToMarkdownLegacy(epic: JiraEpic): string {
     logger.debug('Exporting to Markdown');
 
     const lines: string[] = [];
